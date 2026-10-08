@@ -96,6 +96,9 @@ class MainActivity : Activity() {
     private var confirmOverlay: View? = null
     private var confirmVisible = false
     private var confirmCancelBtn: TextView? = null
+    private var channelAdapter: RowAdapter? = null
+    private var groupAdapter: RowAdapter? = null
+    private var panelCol = 1          // 0=分组列表 1=频道列表
 
     companion object {
         const val MODE_NATIVE = 0
@@ -305,21 +308,27 @@ class MainActivity : Activity() {
 
     private fun isPanelVisible(): Boolean = panelLayout?.visibility == View.VISIBLE
 
-    /** 面板列表行的适配器：白字、透明底（让 ListView 的选中高亮透出来） */
+    /** 面板列表行的适配器：高亮由我们自己控制（row == selected 时蓝色底），不依赖系统焦点 */
     private inner class RowAdapter(private val items: List<String>) : android.widget.BaseAdapter() {
+        var selected = 0
+            set(value) { field = value; notifyDataSetChanged() }
+
         override fun getCount(): Int = items.size
         override fun getItem(position: Int): Any = items[position]
         override fun getItemId(position: Int): Long = position.toLong()
+
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
             val tv = (convertView as? TextView) ?: TextView(this@MainActivity).apply {
                 textSize = 17f
                 setTextColor(Color.WHITE)
-                setPadding(36, 24, 36, 24)
-                setBackgroundColor(Color.TRANSPARENT)
+                setPadding(36, 22, 36, 22)
                 isSingleLine = true
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             tv.text = items[position]
+            val on = position == selected
+            tv.setBackgroundColor(if (on) Color.parseColor("#1B6EF3") else Color.TRANSPARENT)
+            tv.setTextColor(if (on) Color.WHITE else Color.parseColor("#DDDDDD"))
             return tv
         }
     }
@@ -361,14 +370,8 @@ class MainActivity : Activity() {
             else g.name == channels.getOrNull(currentChannel)?.group
         }
         if (gpos >= 0) { curGroupPos = gpos; updateChannelListOfGroup(gpos) }
-        groupList?.setSelection(curGroupPos + 1)
-        // 焦点进入面板（否则方向键不会作用于列表）
-        channelList?.post { channelList?.requestFocus() }
-        channelList?.post {
-            val list = channelsOfGroup(curGroupPos)
-            val ci = list.indexOfFirst { it.num == channels.getOrNull(currentChannel)?.num }
-            if (ci >= 0) channelList?.setSelection(ci)
-        }
+        panelCol = 1
+        refreshPanelHighlight()
         resetHideTimer()
     }
 
@@ -384,20 +387,23 @@ class MainActivity : Activity() {
 
         groupList = ListView(this@MainActivity).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            adapter = RowAdapter(listOf("⚙ 设置") + panelGroups().map { "${it.name} (${it.count})" })
-            setSelector(highlightDrawable())
-            isFocusable = true
-            isFocusableInTouchMode = true
+            val ga = RowAdapter(listOf("⚙ 设置") + panelGroups().map { "${it.name} (${it.count})" })
+            groupAdapter = ga
+            adapter = ga
+            setSelector(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isFocusable = false
+            isFocusableInTouchMode = false
             setItemsCanFocus(false)
             onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
                 if (pos == 0) {
                     startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
                     hidePanel(); return@OnItemClickListener
                 }
+                if (pos == 0) return@OnItemClickListener
                 curGroupPos = pos - 1
                 updateChannelListOfGroup(curGroupPos)
-                channelList?.requestFocus()          // 选完分组自动跳到频道列表
-                if (channelList?.childCount ?: 0 > 0) channelList?.setSelection(0)
+                panelCol = 1
+                refreshPanelHighlight()
             }
             setPadding(8, 24, 8, 24)
             setOnTouchListener { v, ev ->
@@ -410,9 +416,9 @@ class MainActivity : Activity() {
 
         channelList = ListView(this@MainActivity).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            setSelector(highlightDrawable())
-            isFocusable = true
-            isFocusableInTouchMode = true
+            setSelector(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isFocusable = false
+            isFocusableInTouchMode = false
             setItemsCanFocus(false)
             onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
                 val list = channelsOfGroup(curGroupPos)
@@ -422,13 +428,6 @@ class MainActivity : Activity() {
             setOnTouchListener { v, ev ->
                 if (ev.action == MotionEvent.ACTION_DOWN || ev.action == MotionEvent.ACTION_MOVE) resetHideTimer()
                 v.onTouchEvent(ev)
-            }
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                    val list = channelsOfGroup(curGroupPos)
-                    if (pos in list.indices) schedulePrefetch(list[pos])
-                }
-                override fun onNothingSelected(parent: AdapterView<*>?) { }
             }
             setOnScrollListener(object : AbsListView.OnScrollListener {
                 override fun onScrollStateChanged(v: AbsListView, s: Int) { resetHideTimer() }
@@ -441,7 +440,21 @@ class MainActivity : Activity() {
 
     private fun updateChannelListOfGroup(pos: Int) {
         val list = channelsOfGroup(pos)
-        channelList?.adapter = RowAdapter(list.map { "%3d  %s".format(it.num, it.name) })
+        val ca = RowAdapter(list.map { "%3d  %s".format(it.num, it.name) })
+        channelAdapter = ca
+        channelList?.adapter = ca
+        // 默认高亮正在播的频道
+        val ci = list.indexOfFirst { it.num == channels.getOrNull(currentChannel)?.num }
+        ca.selected = if (ci >= 0) ci else 0
+    }
+
+    /** 刷新两个列表的高亮（我们自己控制，不依赖系统焦点） */
+    private fun refreshPanelHighlight() {
+        val gsel = if (panelCol == 0) curGroupPos + 1 else -1
+        groupAdapter?.selected = if (gsel >= 0) gsel else -1
+        groupList?.setSelection(curGroupPos + 1)
+        val cpos = channelAdapter?.selected ?: 0
+        channelList?.setSelection(cpos)
     }
 
     private fun hidePanel() { handler.removeCallbacks(hidePanelTask); panelLayout?.visibility = View.GONE }
@@ -635,24 +648,69 @@ class MainActivity : Activity() {
         if (keyCode == KeyEvent.KEYCODE_NUMPAD_0) { onDigit(0); return true }
         if (keyCode in KeyEvent.KEYCODE_NUMPAD_1..KeyEvent.KEYCODE_NUMPAD_9) { onDigit(keyCode - KeyEvent.KEYCODE_NUMPAD_0); return true }
 
-        // ★ 面板打开时：只接管 返回/菜单(收藏)，方向键与确认键全部交给列表自己处理
+        // ★ 面板打开时：方向键/确认键全部由我们自己处理（不依赖系统焦点，电视盒子兼容性最好）
         if (isPanelVisible()) {
             resetHideTimer()
+            val chList = channelsOfGroup(curGroupPos)
             when (keyCode) {
                 KeyEvent.KEYCODE_BACK -> { hidePanel(); return true }
+
                 KeyEvent.KEYCODE_MENU -> {
-                    val list = channelsOfGroup(curGroupPos)
-                    val pos = channelList?.selectedItemPosition ?: -1
-                    if (pos in 0 until list.size) {
-                        toggleFav(list[pos])
+                    val pos = channelAdapter?.selected ?: -1
+                    if (pos in chList.indices) {
+                        toggleFav(chList[pos])
                         updateChannelListOfGroup(curGroupPos)
-                        channelList?.setSelection(pos)
-                        Toast.makeText(this, if (favSet().contains(list[pos].num.toString())) "★ 已收藏 ${list[pos].name}" else "☆ 已取消 ${list[pos].name}", Toast.LENGTH_SHORT).show()
+                        channelAdapter?.selected = pos
+                        Toast.makeText(this, if (favSet().contains(chList[pos].num.toString())) "★ 已收藏 ${chList[pos].name}" else "☆ 已取消 ${chList[pos].name}", Toast.LENGTH_SHORT).show()
+                    }
+                    return true
+                }
+
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    if (panelCol == 1) { panelCol = 0; refreshPanelHighlight() }
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    if (panelCol == 0) { panelCol = 1; refreshPanelHighlight() }
+                    return true
+                }
+
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1
+                    if (panelCol == 1) {
+                        val a = channelAdapter ?: return true
+                        if (chList.isEmpty()) return true
+                        val np = (a.selected + delta).coerceIn(0, chList.size - 1)
+                        a.selected = np
+                        channelList?.setSelection(np)
+                        schedulePrefetch(chList.getOrNull(np))   // 提前备好源
+                    } else {
+                        val a = groupAdapter ?: return true
+                        val total = (a.count) // 含"⚙ 设置"
+                        val cur = curGroupPos + 1
+                        val np = (cur + delta).coerceIn(0, total - 1)
+                        if (np != cur) {
+                            if (np == 0) { a.selected = 0 }                       // 停在"设置"上，确认才进
+                            else { curGroupPos = np - 1; a.selected = np; updateChannelListOfGroup(curGroupPos) }
+                            groupList?.setSelection(np)
+                        }
+                    }
+                    return true
+                }
+
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    if (panelCol == 0) {
+                        val np = groupAdapter?.selected ?: 0
+                        if (np == 0) { startActivity(Intent(this, SettingsActivity::class.java)); hidePanel() }
+                        else { curGroupPos = np - 1; updateChannelListOfGroup(curGroupPos); panelCol = 1; refreshPanelHighlight() }
+                    } else {
+                        val pos = channelAdapter?.selected ?: -1
+                        if (pos in chList.indices) { playChannel(channels.indexOf(chList[pos])); hidePanel() }
                     }
                     return true
                 }
             }
-            return super.onKeyDown(keyCode, event)
+            return true   // 面板打开时吞掉其它按键，避免误触发换台
         }
 
         when (keyCode) {
