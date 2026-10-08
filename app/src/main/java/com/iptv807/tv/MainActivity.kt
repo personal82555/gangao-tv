@@ -684,6 +684,17 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 从设置页输入卡密激活后，回来立即生效
+        run {
+            val prefs = getSharedPreferences("iptv_license", MODE_PRIVATE)
+            val nowVip = prefs.getBoolean("is_vip", false)
+            val card = prefs.getString("card_key", "") ?: ""
+            if (nowVip && (card.isNotEmpty() || !isVip)) {
+                isVip = true
+                trialText.visibility = View.GONE
+                handler.removeCallbacks(uiTick)
+            }
+        }
         // 从桌面/设置返回：先尝试续播，失败则显示「继续播放」按钮
         if (wasStopped) {
             wasStopped = false

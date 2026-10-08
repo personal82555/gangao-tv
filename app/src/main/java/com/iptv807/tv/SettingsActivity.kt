@@ -12,6 +12,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
@@ -123,6 +124,34 @@ class SettingsActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 24 })
 
 
+        // ===== 卡密激活 =====
+        root.addView(TextView(this).apply {
+            text = "卡密激活"
+            textSize = 15f; setTextColor(Color.parseColor("#7AA7D9"))
+            setPadding(0, 8, 0, 8)
+        })
+        val cardInput = EditText(this).apply {
+            hint = "请输入卡密"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.parseColor("#888888"))
+            setBackgroundColor(Color.parseColor("#1C2028"))
+            setPadding(24, 20, 24, 20)
+            isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+        }
+        root.addView(cardInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 12 })
+
+        val actBtn = Button(this).apply {
+            text = "激活"
+            textSize = 17f
+            setBackgroundColor(Color.parseColor("#1B6EF3"))
+            setOnClickListener { doActivate(cardInput.text.toString().trim()) }
+        }
+        root.addView(actBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 40 })
+
         if (isVip) {
             root.addView(TextView(this).apply {
                 text = "✓ 已经是会员"
@@ -139,6 +168,36 @@ class SettingsActivity : Activity() {
             root.addView(btn, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
+    }
+
+    /** 输入卡密激活 */
+    private fun doActivate(key: String) {
+        if (key.isEmpty()) { statusText.text = "请先输入卡密"; return }
+        statusText.text = "正在验证卡密…"
+        Thread {
+            val r = try {
+                LicenseClient.verify(key, LicenseClient.machineCode(this))
+            } catch (e: Exception) {
+                LicenseClient.Result(false, "网络错误: ${e.javaClass.simpleName}")
+            }
+            runOnUiThread {
+                val prefs = getSharedPreferences("iptv_license", MODE_PRIVATE)
+                prefs.edit()
+                    .putBoolean("is_vip", r.ok)
+                    .putString("card_key", if (r.ok) key else "")
+                    .putString("vip_expire", r.expireTime)
+                    .putBoolean("is_permanent", r.isPermanent)
+                    .apply()
+                statusText.text = if (r.ok) {
+                    "✓ 激活成功！\n${if (r.isPermanent) "永久有效" else "有效期至：${r.expireTime}"}\n卡号：$key"
+                } else {
+                    "✗ 激活失败：${r.message}\n请检查卡密是否正确 / 是否已被使用"
+                }
+                android.widget.Toast.makeText(this@SettingsActivity,
+                    if (r.ok) "激活成功" else "激活失败：${r.message}",
+                    android.widget.Toast.LENGTH_LONG).show()
+            }
+        }.start()
     }
 
     private fun isBootReceiverEnabled(): Boolean =
