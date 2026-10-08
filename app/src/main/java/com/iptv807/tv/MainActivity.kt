@@ -90,6 +90,9 @@ class MainActivity : Activity() {
     private var downY = 0f
     private var downT = 0L
     private var exitHint: TextView? = null
+    private var confirmOverlay: View? = null
+    private var confirmVisible = false
+    private var confirmCancelBtn: TextView? = null
 
     companion object {
         const val MODE_NATIVE = 0
@@ -588,6 +591,11 @@ class MainActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // 退出确认框显示时：返回=取消，其余交给按钮焦点系统处理（左右切换，OK 确认）
+        if (confirmVisible) {
+            if (keyCode == KeyEvent.KEYCODE_BACK) { hideExitConfirm(); return true }
+            return super.onKeyDown(keyCode, event)
+        }
         // 「继续播放」按钮可见时，遥控 OK/确认 直接触发
         if (resumeBtn?.visibility == View.VISIBLE &&
             (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER ||
@@ -683,22 +691,90 @@ class MainActivity : Activity() {
     }
     private val hideExitHintTask = Runnable { exitHint?.visibility = View.GONE }
 
-    /** 退出前先弹窗确认 */
+    /** 退出前先弹确认框（自绘，不依赖系统对话框主题） */
     private fun exitApp() {
         runOnUiThread {
             try {
                 exitHint?.visibility = View.GONE
-                android.app.AlertDialog.Builder(this)
-                    .setTitle("退出应用")
-                    .setMessage("确定要退出「港澳台直播」吗？")
-                    .setPositiveButton("退出") { _, _ -> doExit() }
-                    .setNegativeButton("取消", null)
-                    .setCancelable(true)
-                    .show()
+                showExitConfirm()
             } catch (e: Exception) {
-                doExit()   // 弹窗异常时直接退出，别卡住
+                doExit()
             }
         }
+    }
+
+    /** 自绘退出确认框：上下左右可用遥控，OK 确认 */
+    private fun showExitConfirm() {
+        if (confirmOverlay == null) {
+            val mask = FrameLayout(this).apply { setBackgroundColor(0xCC000000u.toInt()) }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.parseColor("#22262E"))
+                setPadding(64, 48, 64, 48)
+            }
+            card.addView(TextView(this).apply {
+                text = "退出应用"
+                textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 16)
+            })
+            card.addView(TextView(this).apply {
+                text = "确定要退出「港澳台直播」吗？"
+                textSize = 16f; setTextColor(Color.LTGRAY); gravity = Gravity.CENTER
+                setPadding(0, 0, 0, 36)
+            })
+
+            fun mkBtn(label: String, onClick: () -> Unit): TextView {
+                val tv = TextView(this).apply {
+                    text = label
+                    textSize = 18f
+                    setTextColor(Color.WHITE)
+                    gravity = Gravity.CENTER
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    setPadding(56, 22, 56, 22)
+                }
+                // 获得焦点→蓝色，普通→灰色
+                val sl = android.graphics.drawable.StateListDrawable()
+                sl.addState(intArrayOf(android.R.attr.state_focused),
+                    android.graphics.drawable.ColorDrawable(Color.parseColor("#1B6EF3")))
+                sl.addState(intArrayOf(),
+                    android.graphics.drawable.ColorDrawable(Color.parseColor("#3A4150")))
+                tv.background = sl
+                tv.setOnClickListener { onClick() }
+                return tv
+            }
+
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            val cancelBtn = mkBtn("取消") { hideExitConfirm() }
+            val okBtn = mkBtn("退出") {
+                hideExitConfirm()
+                handler.postDelayed({ doExit() }, 120)
+            }
+            row.addView(cancelBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = 32 })
+            row.addView(okBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            card.addView(row)
+
+            mask.addView(card, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            root.addView(mask, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            confirmOverlay = mask
+            confirmCancelBtn = cancelBtn
+        }
+        confirmOverlay?.visibility = View.VISIBLE
+        confirmVisible = true
+        // 默认焦点放在「取消」上，避免误按 OK 直接退出
+        confirmCancelBtn?.post { confirmCancelBtn?.requestFocus() }
+    }
+
+    private fun hideExitConfirm() {
+        confirmVisible = false
+        confirmOverlay?.visibility = View.GONE
     }
 
     /** 真正完全退出 App */
