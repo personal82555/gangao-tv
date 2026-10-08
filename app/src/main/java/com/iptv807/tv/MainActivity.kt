@@ -67,7 +67,8 @@ class MainActivity : Activity() {
         override fun run() {
             if (loadingMask.visibility != View.VISIBLE) return
             val s = ((System.currentTimeMillis() - loadStart) / 1000 + 1).toInt()
-            loadingText.text = "正在加载 $s 秒，精彩继续…"
+            loadingText.text = if (loadChannelName.isEmpty()) "正在加载 $s 秒，精彩继续…"
+                               else "正在加载「$loadChannelName」$s 秒…"
             handler.postDelayed(this, 1000)
         }
     }
@@ -81,6 +82,8 @@ class MainActivity : Activity() {
     private var isVip = false
     private var lastPlayError = ""
     private var lastSelfTest = ""
+    private var loadChannelName = ""
+    private var triedFresh = false
     private var failureReport = ""
     private var wasStopped = false
     private var resumeBtn: TextView? = null
@@ -228,10 +231,8 @@ class MainActivity : Activity() {
         if (savedInstanceState == null && channels.isNotEmpty()) {
             val defIdx = channels.indexOfFirst { it.name.contains("TVB翡翠台") }.let { if (it >= 0) it else 0 }
             playChannel(defIdx)
-            // 启动后台预取默认频道所在分组，之后切台秒开
-            val g = channels.getOrNull(defIdx)?.group
-            val gi = ChannelData.groups().indexOfFirst { it.name == g }
-            if (gi >= 0) handler.postDelayed({ prefetchGroup(gi) }, 2500)
+            // 启动后预取默认频道的相邻频道（很轻量，1 个一个来）
+            handler.postDelayed({ schedulePrefetch(channels.getOrNull(defIdx)) }, 2000)
         }
     }
 
@@ -422,6 +423,13 @@ class MainActivity : Activity() {
                 if (ev.action == MotionEvent.ACTION_DOWN || ev.action == MotionEvent.ACTION_MOVE) resetHideTimer()
                 v.onTouchEvent(ev)
             }
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    val list = channelsOfGroup(curGroupPos)
+                    if (pos in list.indices) schedulePrefetch(list[pos])
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) { }
+            }
             setOnScrollListener(object : AbsListView.OnScrollListener {
                 override fun onScrollStateChanged(v: AbsListView, s: Int) { resetHideTimer() }
                 override fun onScroll(v: AbsListView, a: Int, b: Int, c: Int) { resetHideTimer() }
@@ -432,25 +440,26 @@ class MainActivity : Activity() {
     }
 
     private fun updateChannelListOfGroup(pos: Int) {
-        prefetchGroup(pos)
         val list = channelsOfGroup(pos)
         channelList?.adapter = RowAdapter(list.map { "%3d  %s".format(it.num, it.name) })
     }
 
     private fun hidePanel() { handler.removeCallbacks(hidePanelTask); panelLayout?.visibility = View.GONE }
 
-    /** 后台预取某分组所有频道的源，让切台变秒切（每次运行只做一轮） */
-    private var prefetchedGroups = HashSet<Int>()
-    private fun prefetchGroup(gpos: Int) {
-        if (prefetchedGroups.contains(gpos)) return
-        prefetchedGroups.add(gpos)
-        val list = channelsOfGroup(gpos)
+    /** 只预取"当前高亮的那一个频道"（1.2 秒去抖动）——源站很脆，不做整组预取 */
+    private val prefetchTask = Runnable {
+        val ch = prefetchTarget ?: return@Runnable
+        if (SourceResolver.hasCache(ch.tid, ch.id)) return@Runnable
         Thread {
-            for (ch in list) {
-                try { SourceResolver.resolveLines(ch.tid, ch.id) } catch (e: Exception) { }
-                try { Thread.sleep(250) } catch (ie: InterruptedException) { }
-            }
+            try { SourceResolver.resolveLines(ch.tid, ch.id) } catch (e: Exception) { }
         }.start()
+    }
+    private var prefetchTarget: ChannelData.Channel? = null
+    private fun schedulePrefetch(ch: ChannelData.Channel?) {
+        if (ch == null) return
+        prefetchTarget = ch
+        handler.removeCallbacks(prefetchTask)
+        handler.postDelayed(prefetchTask, 1200)
     }
     private fun resetHideTimer() {
         handler.removeCallbacks(hidePanelTask)
@@ -473,6 +482,8 @@ class MainActivity : Activity() {
         val isSameChannel = (idx == currentChannel)
         currentChannel = idx; currentLine = line
         val ch = channels[idx]
+        if (!isSameChannel) triedFresh = false
+        loadChannelName = ch.name
         if (!isSameChannel || loadingMask.visibility != View.VISIBLE) {
             beginLoading()   // 只有换台才重置计时；同台换线路时继续计时
         }
@@ -565,8 +576,25 @@ class MainActivity : Activity() {
         val ch = channels.getOrNull(currentChannel) ?: return
         currentLine++
         if (currentLine > 12) {
+            // 可能是缓存里的 token 过期了 → 强制刷新一次源再试一轮
+            if (!triedFresh) {
+                triedFresh = true
+                statusText.text = "线路失效，正在刷新源…"
+                Thread {
+                    val fresh = try { SourceResolver.resolveFresh(ch.tid, ch.id) } catch (e: Exception) { null }
+                    runOnUiThread {
+                        if (!fresh.isNullOrEmpty()) { currentLine = 0; playChannel(currentChannel, 0) }
+                        else {
+                            val vn = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "?" }
+                            statusText.text = "⚠ ${ch.num} ${ch.name} 全部线路失败\n$lastPlayError\n解析: ${SourceResolver.lastError}\n版本: v$vn"
+                            hideLoading()
+                        }
+                    }
+                }.start()
+                return
+            }
             val vn = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "?" }
-            statusText.text = "⚠ ${ch.num} ${ch.name} 全部线路失败\n$lastPlayError\n解析: ${SourceResolver.lastError}\n$failureReport\n版本: v$vn"
+            statusText.text = "⚠ ${ch.num} ${ch.name} 全部线路失败\n$lastPlayError\n解析: ${SourceResolver.lastError}\n版本: v$vn"
             hideLoading()
             return
         }

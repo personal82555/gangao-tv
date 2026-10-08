@@ -27,7 +27,9 @@ object SourceResolver {
 
     @Volatile private var cache: MutableMap<String, Cached>? = null
     private data class Cached(val lines: List<String>, val ts: Long)
-    private const val TTL = 8 * 60 * 1000L
+    /** 每频道独立锁：避免后台预取把用户切台的请求挡住 */
+    private val locks = ConcurrentHashMap<String, Any>()
+    private const val TTL = 30 * 60 * 1000L
 
     private const val BASE = "https://m.iptv807.com/"
     private const val UA = "Mozilla/5.0 (Linux; Android 12; SM-S901B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -56,6 +58,12 @@ object SourceResolver {
     /** 兼容之前的 method signature */
     fun resolve(tid: String, id: String): List<String>? = resolveLines(tid, id)
 
+    /** 该频道是否已有可用缓存（不触发网络请求） */
+    fun hasCache(tid: String, id: String): Boolean {
+        val c = cache?.get("$tid-$id") ?: return false
+        return System.currentTimeMillis() - c.ts < TTL
+    }
+
     /** 强制丢弃缓存重新抓源（用于"缓存线路全失效"时） */
     fun resolveFresh(tid: String, id: String): List<String>? {
         cache?.remove("$tid-$id")
@@ -66,7 +74,8 @@ object SourceResolver {
         val key = "$tid-$id"
         cache?.get(key)?.let { if (System.currentTimeMillis() - it.ts < TTL) return it.lines }
 
-        synchronized(this) {
+        val lock = locks.getOrPut(key) { Any() }
+        synchronized(lock) {
             // double-check
             cache?.get(key)?.let { if (System.currentTimeMillis() - it.ts < TTL) return it.lines }
             try {
