@@ -84,6 +84,8 @@ class MainActivity : Activity() {
     private var lastSelfTest = ""
     private var loadChannelName = ""
     private var triedFresh = false
+    /** true=当前这次"新开播"还没真正开始（避免旧频道的播放回调把加载提示提前隐藏） */
+    private var awaitingStart = false
     private var failureReport = ""
     private var wasStopped = false
     private var resumeBtn: TextView? = null
@@ -215,12 +217,16 @@ class MainActivity : Activity() {
             }
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
-                    Player.STATE_READY -> { setMode(MODE_NATIVE); hideLoading() }
+                    Player.STATE_READY -> { setMode(MODE_NATIVE); if (awaitingStart) { awaitingStart = false; hideLoading() } }
                     Player.STATE_BUFFERING -> { /* 缓冲中，保持计时继续 */ }
                 }
             }
             override fun onIsPlayingChanged(p: Boolean) {
-                if (p) { hideLoading(); resumeBtn?.visibility = View.GONE }
+                if (p) {
+                    resumeBtn?.visibility = View.GONE
+                    // 只有"这次要播的新频道"真正起播了才收起加载提示
+                    if (awaitingStart) { awaitingStart = false; hideLoading() }
+                }
             }
         })
 
@@ -484,8 +490,10 @@ class MainActivity : Activity() {
     /** 开始一次新的换台计时（只在切台时调用） */
     private fun beginLoading() {
         loadStart = System.currentTimeMillis()
+        awaitingStart = false
         loadingText.text = "正在加载 1 秒，精彩继续…"
         loadingMask.visibility = View.VISIBLE
+        loadingMask.bringToFront()
         handler.removeCallbacks(loadTick)
         handler.postDelayed(loadTick, 1000)
     }
@@ -577,6 +585,7 @@ class MainActivity : Activity() {
         val item = MediaItem.Builder().setUri(Uri.parse(url))
             .setMimeType(if (isFlv) MimeTypes.VIDEO_FLV else MimeTypes.APPLICATION_M3U8)
             .build()
+        awaitingStart = true
         player?.setMediaItem(item)
         player?.prepare()
         player?.playWhenReady = true
