@@ -1,1 +1,0 @@
-v5.2.1 根因: obfuscated var字符串含内嵌引号("caf074ce…"里的".join(\"\")"是 HTML escape \" 不是纯") — my evalConcat treats them as separate literals and mangles to "++.split..." garbage. Fix: quote-aware ++ skip via char-set approach with REV-suffix as one unit.
