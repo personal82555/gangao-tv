@@ -86,6 +86,7 @@ class MainActivity : Activity() {
     private var triedFresh = false
     /** true=当前这次"新开播"还没真正开始（避免旧频道的播放回调把加载提示提前隐藏） */
     private var awaitingStart = false
+    private var lastPlayedUrl: String? = null
     private var failureReport = ""
     private var wasStopped = false
     private var resumeBtn: TextView? = null
@@ -586,6 +587,7 @@ class MainActivity : Activity() {
             .setMimeType(if (isFlv) MimeTypes.VIDEO_FLV else MimeTypes.APPLICATION_M3U8)
             .build()
         awaitingStart = true
+        lastPlayedUrl = url
         player?.setMediaItem(item)
         player?.prepare()
         player?.playWhenReady = true
@@ -897,12 +899,24 @@ class MainActivity : Activity() {
         // 从桌面/设置返回：先尝试续播，失败则显示「继续播放」按钮
         if (wasStopped) {
             wasStopped = false
-            try { player?.play() } catch (e: Exception) { }
-            handler.postDelayed({
-                // 直播流暂停后常常定格无法续播 → 给用户一个明确的按钮
-                if (player?.isPlaying != true) resumeBtn?.visibility = View.VISIBLE
-                else resumeBtn?.visibility = View.GONE
-            }, 1800)
+            val idx = if (currentChannel in channels.indices) currentChannel else 0
+            val url = lastPlayedUrl
+            if (url != null && channels.isNotEmpty()) {
+                // 直接重连同一路流（新 HTTP 连接），直播流这样才能真正恢复
+                loadChannelName = channels.getOrNull(idx)?.name ?: ""
+                beginLoading()
+                playUrl(url, channels[idx])
+                handler.postDelayed({
+                    if (player?.isPlaying != true) resumeBtn?.visibility = View.VISIBLE
+                    else resumeBtn?.visibility = View.GONE
+                }, 3500)
+            } else {
+                try { player?.play() } catch (e: Exception) { }
+                handler.postDelayed({
+                    if (player?.isPlaying != true) resumeBtn?.visibility = View.VISIBLE
+                    else resumeBtn?.visibility = View.GONE
+                }, 1800)
+            }
         }
         if (playRequested > 0) {
             val idx = channels.indexOfFirst { it.num == playRequested }
@@ -915,11 +929,15 @@ class MainActivity : Activity() {
     private fun resumePlayback() {
         resumeBtn?.visibility = View.GONE
         val idx = if (currentChannel in channels.indices) currentChannel else 0
-        try { player?.play() } catch (e: Exception) { }
-        // 等 1.2 秒看是否已恢复，没恢复就重连
-        handler.postDelayed({
-            if (player?.isPlaying != true) playChannel(idx)
-        }, 1200)
+        val url = lastPlayedUrl
+        if (url != null && channels.isNotEmpty()) {
+            // 直接重连同一路流：比重新抓源快得多，也最可靠
+            loadChannelName = channels[idx].name
+            beginLoading()
+            playUrl(url, channels[idx])
+        } else {
+            playChannel(idx)
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
