@@ -4,6 +4,7 @@
   <p><b>港澳台 55 个频道，装上就能看，遥控器一点就换台</b></p>
   <p>
     <a href="https://github.com/personal82555/gangao-tv/releases/latest"><img src="https://img.shields.io/badge/下载-APK-1B6EF3?style=for-the-badge" alt="下载"></a>
+    <a href="https://t.me/+7YVPMu9EOChkYmM1"><img src="https://img.shields.io/badge/Telegram-加入交流群-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram"></a>
     <img src="https://img.shields.io/badge/Android-5.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 5.0+">
     <img src="https://img.shields.io/badge/平台-Android%20TV%20%7C%20电视盒子%20%7C%20手机-555?style=for-the-badge" alt="平台">
   </p>
@@ -56,6 +57,24 @@
 
 - 包名：`com.iptv807.tv` ｜ 支持 Android 5.0 及以上 ｜ 横屏
 - TV 桌面会自动出现横幅图标（Leanback）
+
+## 💬 加入交流群
+
+有问题、有建议、想第一时间拿到新版本，欢迎进群里聊。
+
+**👉 [点此加入 Telegram 交流群](https://t.me/+7YVPMu9EOChkYmM1)**
+
+群里能拿到这些：
+
+| | 好处 |
+|---|---|
+| 📢 | **新版本第一时间通知** —— 版本推送发布后群内同步提醒，不用天天来盯 GitHub Releases |
+| 🔧 | **装不上 / 播不出来直接问** —— 带上电视型号和屏幕上的报错文字，通常几分钟就能定位 |
+| 📡 | **频道与线路问题互通** —— 哪个台挂了、哪条线更稳，大家互相同步，修得更快 |
+| 💡 | **功能建议真的会被采纳** —— 数字键换台、选中高亮、收藏置顶、开机自启，这些都来自群里的反馈 |
+| 🎁 | **内测机会** —— 新版本上线前优先发到群里试用 |
+
+> 进群免费，不发广告；遇到问题先看群公告，多数都能自查解决。
 
 ## 💳 会员与激活
 
