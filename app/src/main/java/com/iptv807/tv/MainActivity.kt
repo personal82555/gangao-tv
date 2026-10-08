@@ -97,6 +97,41 @@ class MainActivity : Activity() {
     private var downT = 0L
     private var exitHint: TextView? = null
     private var confirmOverlay: View? = null
+    // 安装统计 + 版本推送
+    private var updateOverlay: View? = null
+    private var pendingUpdate: AuthApi.UpdateInfo? = null
+    private var downloadId = -1L
+    private val heartbeatTask = object : Runnable {
+        override fun run() {
+            Thread {
+                try {
+                    val card = getSharedPreferences("iptv_license", MODE_PRIVATE).getString("card_key", "") ?: ""
+                    AuthApi.heartbeat(LicenseClient.machineCode(this@MainActivity), card, this@MainActivity)
+                } catch (e: Exception) { }
+            }.start()
+            handler.postDelayed(this, 10 * 60 * 1000L)   // 每 10 分钟心跳
+        }
+    }
+    private val downloadReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
+            if (intent.action != android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val id = intent.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            if (id != downloadId) return
+            val dm = ctx.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+            val uri = runCatching { dm.getUriForDownloadedFile(id) }.getOrNull()
+            if (uri != null) runOnUiThread {
+                statusText.text = "✓ 新版本下载完成，正在打开安装…"
+                try {
+                    val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                        .setDataAndType(uri, "application/vnd.android.package-archive")
+                        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(i)
+                } catch (e: Exception) {
+                    statusText.text = "已下载到 下载/ 目录，请手动安装"
+                }
+            }
+        }
+    }
     private var confirmVisible = false
     private var confirmCancelBtn: TextView? = null
     private var channelAdapter: RowAdapter? = null
@@ -238,6 +273,7 @@ class MainActivity : Activity() {
         // 播放期间保持屏幕常亮
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         checkLicense()
+        startInstallTracking()   // 安装统计 + 检查新版本
         if (savedInstanceState == null && channels.isNotEmpty()) {
             val defIdx = channels.indexOfFirst { it.name.contains("TVB翡翠台") }.let { if (it >= 0) it else 0 }
             playChannel(defIdx)
@@ -788,6 +824,143 @@ class MainActivity : Activity() {
     }
     private val hideExitHintTask = Runnable { exitHint?.visibility = View.GONE }
 
+    // ===== 安装统计 & 版本推送 =====
+    private fun startInstallTracking() {
+        val prefs = getSharedPreferences("iptv_license", MODE_PRIVATE)
+        val card = prefs.getString("card_key", "") ?: ""
+        Thread {
+            val mid = LicenseClient.machineCode(this@MainActivity)
+            // check-update 一次请求同时完成：安装登记 + 在线上报 + 查新版本
+            val info = runCatching {
+                AuthApi.checkUpdate(mid, card, this@MainActivity)
+            }.getOrDefault(AuthApi.UpdateInfo(msg = AuthApi.lastError))
+            runOnUiThread {
+                if (info.ok) {
+                    val sb = StringBuilder("安装上报 ok #${info.installId} · v${AuthApi.clientVersion(this)}")
+                    if (info.updateAvailable) sb.append(" · 发现新版 v${info.latestVersion}")
+                    statusText.text = sb.toString()
+                    handler.postDelayed({
+                        val c = channels.getOrNull(currentChannel)
+                        if (c != null) statusText.text = "▶ ${c.num} ${c.name}"
+                    }, 8000)
+                    if (info.updateAvailable) {
+                        pendingUpdate = info
+                        showUpdateDialog(info)
+                    }
+                } else {
+                    statusText.text = "安装上报失败: ${info.msg}"
+                }
+            }
+        }.start()
+        handler.removeCallbacks(heartbeatTask)
+        handler.postDelayed(heartbeatTask, 60 * 1000L)   // 1 分钟后首次心跳
+    }
+
+    /** 新版本提示（自绘浮层，电视全屏主题下 AlertDialog 不可靠） */
+    private fun showUpdateDialog(info: AuthApi.UpdateInfo) {
+        if (updateOverlay == null) {
+            val mask = FrameLayout(this).apply { setBackgroundColor(0xCC000000u.toInt()) }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.parseColor("#22262E"))
+                setPadding(64, 48, 64, 48)
+            }
+            card.addView(TextView(this).apply {
+                text = "发现新版本"; textSize = 24f; setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER; setPadding(0, 0, 0, 12)
+            })
+            card.addView(TextView(this).apply {
+                tag = "ver"; textSize = 40f; setTextColor(Color.parseColor("#4CAF50"))
+                gravity = Gravity.CENTER; setPadding(0, 0, 0, 16)
+            })
+            card.addView(TextView(this).apply {
+                tag = "meta"; textSize = 15f; setTextColor(Color.LTGRAY)
+                gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f); setPadding(0, 0, 0, 24)
+            })
+            card.addView(TextView(this).apply {
+                tag = "chg"; textSize = 15f; setTextColor(Color.WHITE)
+                setBackgroundColor(Color.parseColor("#1C2028"))
+                setPadding(24, 20, 24, 20); setLineSpacing(0f, 1.25f)
+                maxLines = 8; gravity = Gravity.CENTER
+            })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, 28, 0, 0) }
+            fun mkBtn(label: String, focusable: Boolean, onClick: () -> Unit): TextView =
+                TextView(this).apply {
+                    text = label; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                    setPadding(56, 22, 56, 22); isFocusable = focusable; isFocusableInTouchMode = focusable
+                    if (focusable) background = android.graphics.drawable.StateListDrawable().apply {
+                        addState(intArrayOf(android.R.attr.state_focused),
+                            android.graphics.drawable.ColorDrawable(Color.parseColor("#1B6EF3")))
+                        addState(intArrayOf(), android.graphics.drawable.ColorDrawable(Color.parseColor("#3A4150")))
+                    } else setBackgroundColor(Color.parseColor("#2A2F3A"))
+                    setOnClickListener { onClick() }
+                }
+            val laterBtn = mkBtn("稍后", true) { hideUpdateDialog() }
+            val dlBtn = mkBtn("立即更新", false) {
+                pendingUpdate?.let { startUpdateDownload(it) }; hideUpdateDialog()
+            }
+            row.addView(laterBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = 32 })
+            row.addView(dlBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            card.addView(row)
+            mask.addView(card, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            root.addView(mask, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            updateOverlay = mask
+        }
+        val ver = updateOverlay!!.findViewWithTag<TextView>("ver")
+        val meta = updateOverlay!!.findViewWithTag<TextView>("meta")
+        val chg = updateOverlay!!.findViewWithTag<TextView>("chg")
+        ver.text = "v" + info.latestVersion
+        val mb = if (info.fileSize > 0) "%.1f MB".format(info.fileSize / 1024.0 / 1024.0) else ""
+        val force = info.updateRequired || (info.minClientVersion.isNotEmpty() &&
+                compareVersion(AuthApi.clientVersion(this), info.minClientVersion) < 0)
+        meta.text = "当前 v${AuthApi.clientVersion(this)}" + (if (mb.isNotEmpty()) "  ·  $mb" else "") +
+                (if (force) "\n⚠ 请升级到此版本" else "")
+        chg.text = info.changelog.ifEmpty { "本次更新包含功能优化与问题修复" }
+        updateOverlay!!.visibility = View.VISIBLE
+        // 强制更新时不给"稍后"
+        updateOverlay!!.findViewWithTag<TextView>("ver") // touch to ensure rendered
+    }
+
+    private fun hideUpdateDialog() { updateOverlay?.visibility = View.GONE }
+
+    /** 比较 "9.10.0" vs "9.3.0" 之类 */
+    fun compareVersion(a: String, b: String): Int {
+        val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
+        val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val x = pa.getOrElse(i) { 0 }; val y = pb.getOrElse(i) { 0 }
+            if (x != y) return if (x > y) 1 else -1
+        }
+        return 0
+    }
+
+    /** 用系统 DownloadManager 下载新版本 APK，完成广播里自动拉起安装 */
+    private fun startUpdateDownload(info: AuthApi.UpdateInfo) {
+        if (info.downloadUrl.isEmpty()) {
+            statusText.text = "暂无下载地址，请到后台发布安装包"
+            return
+        }
+        try {
+            val dm = getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+            val name = "gangao-tv-${info.latestVersion}.apk"
+            val req = android.app.DownloadManager.Request(Uri.parse(info.downloadUrl))
+                .setTitle("港澳台直播 v${info.latestVersion}")
+                .setDescription("正在下载新版本…")
+                .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setMimeType("application/vnd.android.package-archive")
+                .setDestinationInExternalFilesDir(this, android.os.Environment.DIRECTORY_DOWNLOADS, name)
+            downloadId = dm.enqueue(req)
+            try { registerReceiver(downloadReceiver, android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE)) } catch (e: Exception) { }
+            statusText.text = "⬇ 已开始下载 v${info.latestVersion}，完成后会自动提示安装"
+        } catch (e: Exception) {
+            statusText.text = "下载失败: ${e.message}"
+        }
+    }
+
     /** 退出前先弹确认框（自绘，不依赖系统对话框主题） */
     private fun exitApp() {
         runOnUiThread {
@@ -965,6 +1138,7 @@ class MainActivity : Activity() {
         handler.removeCallbacksAndMessages(null)
         playerView.player = null
         player?.release()
+        runCatching { unregisterReceiver(downloadReceiver) }
         super.onDestroy()
     }
 }

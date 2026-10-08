@@ -5,6 +5,16 @@
 
 ---
 
+## v9.3.0（2026-10-08）→ ✨新功能
+- ✨ **接入安装统计**：启动时调用 `POST /api/public/installations/check-update` 完成安装登记与在线上报（返回 `install_id`）
+- ✨ **接入版本推送**：同一请求同时返回 `update_available / latest_version / download_url / file_size / changelog / min_client_version / is_force`
+- ✨ 发现新版本时弹出更新提示（版本号、当前版本、文件大小、更新说明；强制更新额外提示），走系统 `DownloadManager` 下载并在完成后自动拉起安装
+- ✨ 每 10 分钟心跳 `POST /api/public/installations/heartbeat`，更新"最后上线"时间
+- ✨ 设置页新增「版本更新」区块：显示安装上报结果与 `install_id`，可手动「检查更新」
+- 🔧 接入服务端：`https://auth.88531.cn`，请求头 `X-Api-Key`；文档见 `auth.88531.cn/#/docs`
+- 🔧 新增权限：`REQUEST_INSTALL_PACKAGES`、`POST_NOTIFICATIONS`
+
+
 ## v9.2.0（2026-10-08）→ ✨新功能 / 🐛修复
 - 🐛 从设置页或桌面返回时，直接**重连当前流**（不再依赖 `play()`，避免画面定格）
 - ✨「▶ 继续播放」按钮改为强制重连同一路流，恢复更快更可靠

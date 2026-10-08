@@ -26,6 +26,7 @@ import android.widget.TextView
 class SettingsActivity : Activity() {
 
     private lateinit var statusText: TextView
+    private lateinit var statusText2: TextView
 
     /** 焦点高亮背景：获得焦点→蓝色，普通→深灰 */
     private fun focusBg(normal: Int = 0xFF2A2F3A.toInt(), focused: Int = 0xFF1B6EF3.toInt())
@@ -154,6 +155,25 @@ class SettingsActivity : Activity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 24 })
 
 
+        // ===== 安装统计 & 版本更新 =====
+        root.addView(TextView(this).apply {
+            text = "版本更新"
+            textSize = 15f; setTextColor(Color.parseColor("#7AA7D9"))
+            setPadding(0, 8, 0, 8)
+        })
+        statusText2 = TextView(this).apply {
+            textSize = 15f; setLineSpacing(0f, 1.15f)
+            setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#1C2028"))
+            setPadding(24, 20, 24, 20)
+            text = "点击右侧按钮检查是否有新版本\n（安装统计会在启动时自动上报）"
+        }
+        root.addView(statusText2, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 12 })
+
+        val checkBtn = mkAction("检查更新") { doCheckUpdate() }
+        root.addView(checkBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 40 })
+
         // ===== 卡密激活 =====
         root.addView(TextView(this).apply {
             text = "卡密激活"
@@ -220,6 +240,33 @@ class SettingsActivity : Activity() {
                 android.widget.Toast.makeText(this@SettingsActivity,
                     if (r.ok) "激活成功" else "激活失败：${r.message}",
                     android.widget.Toast.LENGTH_LONG).show()
+            }
+        }.start()
+    }
+
+    /** 检查新版本（安装登记 + 在线上报 会一并完成） */
+    private fun doCheckUpdate() {
+        statusText2.text = "正在检查…"
+        Thread {
+            val mid = LicenseClient.machineCode(this)
+            val card = getSharedPreferences("iptv_license", MODE_PRIVATE).getString("card_key", "") ?: ""
+            val info = AuthApi.checkUpdate(mid, card, this)
+            runOnUiThread {
+                if (!info.ok) {
+                    statusText2.text = "检查失败：${info.msg}"
+                    return@runOnUiThread
+                }
+                val head = "安装上报成功  #${info.installId}\n当前 v${AuthApi.clientVersion(this@SettingsActivity)}"
+                statusText2.text = if (info.updateAvailable) {
+                    "$head\n✅ 有新版本：v${info.latestVersion}" +
+                    (if (info.changelog.isNotEmpty()) "\n${info.changelog}" else "")
+                } else {
+                    "$head\n✅ 已是最新版本"
+                }
+                if (info.updateAvailable) {
+                    android.widget.Toast.makeText(this@SettingsActivity,
+                        "发现新版本 v${info.latestVersion}，返回主界面下载", android.widget.Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
     }
