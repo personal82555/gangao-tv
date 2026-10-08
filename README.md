@@ -49,7 +49,7 @@
 
 ## 📥 下载安装
 
-1. 下载最新 APK：[**港澳台直播-v9.2.0.apk**](apk/港澳台直播-v9.2.0.apk)（或到 [Releases](../../releases) 下载）
+1. 下载最新 APK：[**gangao-tv-v9.2.0.apk**](apk/gangao-tv-v9.2.0.apk)（或到 [Releases](../../releases) 下载）
 2. 传到电视盒子 / 电视 / 手机上
 3. 安装时允许「未知来源」应用
 4. 打开即播，默认进入 **TVB 翡翠台**
