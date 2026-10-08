@@ -11,8 +11,8 @@ android {
         applicationId = "com.iptv807.tv"
         minSdk = 21
         targetSdk = 35
-        versionCode = 840
-        versionName = "8.4.0"
+        versionCode = 850
+        versionName = "8.5.0"
     }
 
     buildTypes {

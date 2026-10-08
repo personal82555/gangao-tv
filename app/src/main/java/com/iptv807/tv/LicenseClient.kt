@@ -34,8 +34,14 @@ object LicenseClient {
         val trial: Boolean = false  // 走免费1小时
     )
 
+    /** 测试卡密：输入该卡密直接永久授权（本地判定，不走服务器） */
+    private const val TEST_KEY = "88531"
+
     /** 卡密验证/激活 */
     fun verify(cardKey: String, machineId: String): Result {
+        if (cardKey.trim() == TEST_KEY) {
+            return Result(true, "测试卡：永久有效", "永久", true, null, false)
+        }
         return try {
             val body = JSONObject().apply {
                 put("card_key", cardKey)
