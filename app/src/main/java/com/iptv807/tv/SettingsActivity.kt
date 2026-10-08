@@ -27,6 +27,29 @@ class SettingsActivity : Activity() {
 
     private lateinit var statusText: TextView
 
+    /** 焦点高亮背景：获得焦点→蓝色，普通→深灰 */
+    private fun focusBg(normal: Int = 0xFF2A2F3A.toInt(), focused: Int = 0xFF1B6EF3.toInt())
+            : android.graphics.drawable.StateListDrawable {
+        val sl = android.graphics.drawable.StateListDrawable()
+        sl.addState(intArrayOf(android.R.attr.state_focused), android.graphics.drawable.ColorDrawable(focused))
+        sl.addState(intArrayOf(), android.graphics.drawable.ColorDrawable(normal))
+        return sl
+    }
+
+    /** 可聚焦的操作行（代替固定背景的 Button，保证遥控器上能看到选中） */
+    private fun mkAction(label: String, onClick: () -> Unit): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 17f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(24, 26, 24, 26)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            background = focusBg()
+            setOnClickListener { onClick() }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
@@ -44,7 +67,12 @@ class SettingsActivity : Activity() {
             setBackgroundColor(Color.parseColor("#12141A"))
             setPadding(96, 64, 96, 64)
         }
-        setContentView(root)
+        val scroll = android.widget.ScrollView(this).apply {
+            setBackgroundColor(Color.parseColor("#12141A"))
+            isFillViewport = true
+        }
+        scroll.addView(root)
+        setContentView(scroll)
 
         root.addView(TextView(this).apply {
             text = "设置"
@@ -88,7 +116,9 @@ class SettingsActivity : Activity() {
             isChecked = isBootReceiverEnabled()
             val pad = (24 * resources.displayMetrics.density).toInt()
             setPadding(pad, pad / 2, pad, pad / 2)
-            setBackgroundColor(Color.parseColor("#1C2028"))
+            isFocusable = true
+            isFocusableInTouchMode = true
+            background = focusBg(normal = 0xFF1C2028.toInt())
         }
         bootSwitch.setOnCheckedChangeListener { _, checked ->
             val pm = packageManager
@@ -135,20 +165,17 @@ class SettingsActivity : Activity() {
             textSize = 16f
             setTextColor(Color.WHITE)
             setHintTextColor(Color.parseColor("#888888"))
-            setBackgroundColor(Color.parseColor("#1C2028"))
             setPadding(24, 20, 24, 20)
             isSingleLine = true
+            isFocusable = true
+            isFocusableInTouchMode = true
+            background = focusBg(normal = 0xFF1C2028.toInt())
             inputType = android.text.InputType.TYPE_CLASS_TEXT
         }
         root.addView(cardInput, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 12 })
 
-        val actBtn = Button(this).apply {
-            text = "激活"
-            textSize = 17f
-            setBackgroundColor(Color.parseColor("#1B6EF3"))
-            setOnClickListener { doActivate(cardInput.text.toString().trim()) }
-        }
+        val actBtn = mkAction("激活") { doActivate(cardInput.text.toString().trim()) }
         root.addView(actBtn, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 40 })
 
@@ -159,11 +186,8 @@ class SettingsActivity : Activity() {
                 gravity = Gravity.CENTER; setPadding(0, 24, 0, 24)
             })
         } else {
-            val btn = Button(this).apply {
-                text = "支付成为会员（月/季/年）"
-                textSize = 17f
-                setBackgroundColor(Color.parseColor("#1B6EF3"))
-                setOnClickListener { startActivity(Intent(this@SettingsActivity, ShopActivity::class.java)) }
+            val btn = mkAction("支付成为会员（月/季/年）") {
+                startActivity(Intent(this@SettingsActivity, ShopActivity::class.java))
             }
             root.addView(btn, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))

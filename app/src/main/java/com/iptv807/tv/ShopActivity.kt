@@ -33,11 +33,44 @@ class ShopActivity : Activity() {
     data class Plan(val id: Int, val name: String, val price: String, val days: Int)
 
     private lateinit var list: ListView
+    private var rowAdapterRef: RowAdapter? = null
+    private lateinit var alipay: TextView
+    private lateinit var wxpay: TextView
+    private var shopZone = 0     // 0=套餐列表 1=支付方式
     private lateinit var statusText: TextView
     private var payType = "alipay"
     private var orderNo = ""
     private var machineId = ""
     private val handler = Handler(Looper.getMainLooper())
+
+    /** 高亮自控的行适配器 */
+    private inner class RowAdapter(private var items: List<String>) : android.widget.BaseAdapter() {
+        var selected = 0
+            set(value) { field = value; notifyDataSetChanged() }
+        fun setItems(v: List<String>) { items = v; notifyDataSetChanged() }
+        override fun getCount(): Int = items.size
+        override fun getItem(position: Int): Any = items[position]
+        override fun getItemId(position: Int): Long = position.toLong()
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            val tv = (convertView as? TextView) ?: TextView(this@ShopActivity).apply {
+                textSize = 18f; setPadding(36, 26, 36, 26)
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            tv.text = items[position]
+            val on = position == selected
+            tv.setBackgroundColor(if (on) Color.parseColor("#1B6EF3") else Color.parseColor("#1C1F26"))
+            tv.setTextColor(Color.WHITE)
+            return tv
+        }
+    }
+
+    private fun focusBg(normal: Int, focused: Int): android.graphics.drawable.StateListDrawable {
+        val sl = android.graphics.drawable.StateListDrawable()
+        sl.addState(intArrayOf(android.R.attr.state_focused), android.graphics.drawable.ColorDrawable(focused))
+        sl.addState(intArrayOf(), android.graphics.drawable.ColorDrawable(normal))
+        return sl
+    }
     private var pollTask: Runnable? = null
     private var pollCount = 0
 
@@ -76,6 +109,10 @@ class ShopActivity : Activity() {
 
         list = ListView(this).apply {
             setBackgroundColor(Color.parseColor("#1C1F26"))
+            setSelector(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setItemsCanFocus(false)
         }
         root.addView(list, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
@@ -88,15 +125,16 @@ class ShopActivity : Activity() {
         root.addView(statusText)
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val alipay = Button(this).apply { text = "支付宝"; textSize = 15f }
-        val wxpay = Button(this).apply { text = "微信"; textSize = 15f }
-        fun sel(b: Button, t: String) {
-            val active = payType == t
-            b.setBackgroundColor(if (active) Color.parseColor("#1B6EF3") else Color.parseColor("#2A2F3A"))
+        fun mkPay(label: String, t: String) = TextView(this).apply {
+            text = label; textSize = 16f
+            setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setPadding(24, 26, 24, 26)
+            isFocusable = true; isFocusableInTouchMode = true
+            background = focusBg(0xFF2A2F3A.toInt(), 0xFF1B6EF3.toInt())
+            setOnClickListener { payType = t; refreshPayBtns() }
         }
-        alipay.setOnClickListener { payType = "alipay"; sel(alipay, "alipay"); sel(wxpay, "wxpay") }
-        wxpay.setOnClickListener { payType = "wxpay"; sel(alipay, "alipay"); sel(wxpay, "wxpay") }
-        sel(alipay, "alipay"); sel(wxpay, "wxpay")
+        alipay = mkPay("支付宝", "alipay")
+        wxpay = mkPay("微信", "wxpay")
         row.addView(alipay, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = 16 })
         row.addView(wxpay, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(row)
@@ -104,8 +142,18 @@ class ShopActivity : Activity() {
         list.onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
             if (pos < plans.size) createOrder(plans[pos])
         }
+        refreshPayBtns()
 
         loadPlans()
+    }
+
+    /** 当前支付方式：亮蓝 + 焦点时更亮 */
+    private fun refreshPayBtns() {
+        val a = payType == "alipay"
+        alipay.setBackgroundColor(Color.parseColor(if (a) "#1B6EF3" else "#2A2F3A"))
+        wxpay.setBackgroundColor(Color.parseColor(if (a) "#2A2F3A" else "#1B6EF3"))
+        alipay.alpha = if (a) 1f else 0.75f
+        wxpay.alpha = if (a) 0.75f else 1f
     }
 
     @SuppressLint("SetTextI18n")
@@ -130,11 +178,13 @@ class ShopActivity : Activity() {
                 }
                 runOnUiThread {
                     plans.sortBy { it.days }
-                    list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, plans.map {
+                    val ra = RowAdapter(plans.map {
                         val d = it.days
                         "📱 ${it.name}   ¥${it.price}   ${if (d >= 999) "永久" else "${d}天"}"
                     })
-                    statusText.text = "选择套餐后按 OK 购买"
+                    rowAdapterRef = ra
+                    list.adapter = ra
+                    statusText.text = "上下选择套餐，OK 购买；左右可切支付方式"
                 }
             } catch (e: Exception) {
                 runOnUiThread { statusText.text = "加载失败: ${e.javaClass.simpleName}: ${e.message?.take(150)}" }
@@ -237,9 +287,41 @@ class ShopActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK && pollTask != null) {
-            // 支付轮询中返回 → 取消轮询
-            handler.removeCallbacks(pollTask!!); pollTask = null
+        // 支付中：回归普通处理
+        if (pollTask != null) {
+            if (keyCode == KeyEvent.KEYCODE_BACK) { handler.removeCallbacks(pollTask!!); pollTask = null }
+            return super.onKeyDown(keyCode, event)
+        }
+        val ra = rowAdapterRef
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_UP) -1 else 1
+                if (shopZone == 0 && ra != null && ra.count > 0) {
+                    val np = ra.selected + delta
+                    if (np < 0) { shopZone = 1; refreshPayBtns(); alipay.requestFocus() }
+                    else { ra.selected = np.coerceAtMost(ra.count - 1); list.setSelection(ra.selected) }
+                } else if (shopZone == 1) {
+                    if (delta > 0) { } else { shopZone = 0; ra?.let { list.setSelection(it.selected) } }
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                if (shopZone == 1) { payType = if (payType == "alipay") "wxpay" else "alipay"; refreshPayBtns() }
+                else if (ra != null && ra.count > 0) {
+                    // 列表里左右也可切支付方式，方便一步到位
+                    payType = if (payType == "alipay") "wxpay" else "alipay"; refreshPayBtns()
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (shopZone == 1) { payType = if (payType == "alipay") "wxpay" else "alipay"; refreshPayBtns() }
+                else {
+                    val pos = ra?.selected ?: -1
+                    if (pos in plans.indices) createOrder(plans[pos])
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_BACK -> { finish(); return true }
         }
         return super.onKeyDown(keyCode, event)
     }
