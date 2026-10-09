@@ -6,3 +6,7 @@ local.properties
 !apk/*.apk
 tools/
 notes.txt
+keystore.properties
+*.jks
+*.keystore
+*.aab
