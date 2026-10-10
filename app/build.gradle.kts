@@ -19,8 +19,8 @@ android {
         applicationId = "com.iptv807.tv"
         minSdk = 21
         targetSdk = 35
-        versionCode = 940
-        versionName = "9.4.0"
+        versionCode = 941
+        versionName = "9.4.1"
     }
 
     signingConfigs {

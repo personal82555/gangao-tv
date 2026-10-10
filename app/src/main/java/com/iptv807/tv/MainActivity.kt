@@ -99,6 +99,8 @@ class MainActivity : Activity() {
     private var confirmOverlay: View? = null
     /** 右上角「立即授权」按钮（未授权时显示） */
     private var authBtn: TextView? = null
+    /** 右下角「已授权」小字标识（已授权时显示，未授权隐藏） */
+    private var authStateText: TextView? = null
     /** 首次启动简易教程遮罩 */
     private var tutorialOverlay: View? = null
     private var tutorialVisible = false
@@ -216,6 +218,20 @@ class MainActivity : Activity() {
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
         root.addView(rightCol, rcLP)
 
+        // 4b) 右下角：已授权标识（小字，不打扰观看；未授权时隐藏）
+        authStateText = TextView(this).apply {
+            text = "✓ 已授权"
+            textSize = 12f
+            setTextColor(0xB3FFFFFF.toInt())      // 70% 白，弱化存在感
+            setBackgroundColor(0x59000000.toInt()) // 35% 黑底，保证在亮画面上也看得清
+            setPadding(14, 6, 14, 6)
+            setShadowLayer(3f, 1f, 1f, Color.BLACK)
+            visibility = View.GONE
+        }
+        root.addView(authStateText, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, 26, 26) })
+
         // 5) 数字键大字
         digitText = TextView(this).apply {
             textSize = 56f; setTextColor(Color.WHITE)
@@ -229,8 +245,9 @@ class MainActivity : Activity() {
         // 6) 加载罩
         loadingMask = FrameLayout(this).apply { setBackgroundColor(0xB2000000u.toInt()); visibility = View.GONE }
         loadingText = TextView(this).apply {
-            textSize = 28f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            setShadowLayer(6f, 3f, 3f, Color.BLACK)
+            textSize = 16f; setTextColor(0xE6FFFFFF.toInt()); gravity = Gravity.CENTER
+            setShadowLayer(4f, 2f, 2f, Color.BLACK)
+            setPadding(32, 0, 32, 0)
         }
         loadingMask.addView(loadingText, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -347,7 +364,11 @@ class MainActivity : Activity() {
             runOnUiThread {
                 isVip = r.ok
                 prefs.edit().putBoolean("is_vip", r.ok).apply()
-                if (r.ok) { trialText.visibility = View.GONE; trialText.text = "VIP"; showAuthButton(false) } else enterFreeMode()
+                if (r.ok) {
+                    trialText.visibility = View.GONE; trialText.text = "VIP"
+                    showAuthButton(false)
+                    showAuthState(true)          // 右下角显示「✓ 已授权」
+                } else enterFreeMode()
             }
         }.start()
     }
@@ -355,8 +376,18 @@ class MainActivity : Activity() {
     private fun enterFreeMode() {
         trialText.visibility = View.VISIBLE
         showAuthButton(true)
+        showAuthState(false)         // 免费模式下不显示右下角标识
         handler.removeCallbacks(uiTick)
         handler.post(uiTick)
+    }
+
+    /** 右下角「✓ 已授权」标识 显示/隐藏 */
+    private fun showAuthState(show: Boolean) {
+        runOnUiThread {
+            val t = authStateText ?: return@runOnUiThread
+            t.visibility = if (show) View.VISIBLE else View.GONE
+            t.text = if (show) "✓ 已授权" else ""
+        }
     }
 
     /** 显示/隐藏右上角「立即授权」按钮 */
@@ -1242,10 +1273,12 @@ class MainActivity : Activity() {
                 isVip = true
                 trialText.visibility = View.GONE
                 showAuthButton(false)
+                showAuthState(true)          // 右下角显示「✓ 已授权」
                 handler.removeCallbacks(uiTick)
             } else if (!nowVip && isVip) {
                 // ★ 设置页里撤销了授权 → 回到免费模式（倒计时 + 立即授权按钮都恢复）
                 isVip = false
+                showAuthState(false)         // 右下角标识隐藏
                 enterFreeMode()
             }
         }
