@@ -214,8 +214,33 @@ class SettingsActivity : Activity() {
                 startActivity(Intent(this@SettingsActivity, ShopActivity::class.java))
             }
             root.addView(btn, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 20 })
         }
+
+        // ===== 其它操作 =====
+        root.addView(TextView(this).apply {
+            text = "其它操作"
+            textSize = 15f; setTextColor(Color.parseColor("#7AA7D9"))
+            setPadding(0, 8, 0, 8)
+        })
+        // 原菜单键的功能（手动换线），现在放在这里
+        val switchBtn = mkAction("切换线路（当前线路不通时手动换）") {
+            try {
+                getSharedPreferences("iptv_main", MODE_PRIVATE).edit()
+                    .putString("pending_action", "switch_line").apply()
+            } catch (e: Exception) { }
+            statusText.text = "已请求切换线路，返回主界面后生效"
+            android.widget.Toast.makeText(this, "返回主界面后自动切换线路", android.widget.Toast.LENGTH_LONG).show()
+            try { finish() } catch (e: Exception) { }
+        }
+        root.addView(switchBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 20 })
+
+        // ★ 诊断标记：证明本页 onCreate 确实跑到了（主界面 1.4 秒后会核对）
+        try {
+            getSharedPreferences("iptv_main", MODE_PRIVATE).edit()
+                .putLong("settings_opened_at", System.currentTimeMillis()).apply()
+        } catch (e: Exception) { }
     }
 
     /** 撤销本机授权：清除本地授权信息 → 恢复免费模式，可重新输入卡密或换机 */

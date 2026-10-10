@@ -408,15 +408,37 @@ class MainActivity : Activity() {
         }
     }
 
-    /** 打开授权/激活页面（含卡密激活与购买入口） */
-    private fun openAuthPage() {
-        try {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        } catch (e: Exception) {
-            statusText.text = "打开授权页失败: ${e.javaClass.simpleName}: ${e.message}"
-            android.widget.Toast.makeText(this, "打开授权页失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+    /** 菜单键/其他入口统一打开设置页；带三重诊断，打不开时屏幕上有原因 */
+    private fun openSettingsPage() {
+        val intent = Intent(this, SettingsActivity::class.java)
+        // ① 预检查：系统能否解析到这个 Activity（manifest 没注册会返回 null）
+        val resolve = try { packageManager.resolveActivity(intent, 0) } catch (e: Exception) { null }
+        if (resolve == null) {
+            statusText.text = "⚠ 设置页无法解析：manifest 未注册 SettingsActivity"
+            android.widget.Toast.makeText(this, "设置页无法解析（manifest 未注册）", android.widget.Toast.LENGTH_LONG).show()
+            return
         }
+        // ② 启动
+        val before = try { getSharedPreferences("iptv_main", MODE_PRIVATE).getLong("settings_opened_at", 0L) } catch (e: Exception) { 0L }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            statusText.text = "⚠ 打开设置失败: ${e.javaClass.simpleName}: ${e.message}"
+            android.widget.Toast.makeText(this, "打开设置失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        // ③ 1.4 秒后核对：SettingsActivity.onCreate 有没有真的跑起来
+        handler.postDelayed({
+            val after = try { getSharedPreferences("iptv_main", MODE_PRIVATE).getLong("settings_opened_at", 0L) } catch (e: Exception) { 0L }
+            if (after <= before) {
+                statusText.text = "⚠ 设置页未响应：onCreate 未执行（启动被拦截或立刻结束）"
+                android.widget.Toast.makeText(this, "设置页未响应，请把这行字告诉我", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }, 1400)
     }
+
+    /** 打开授权/激活页面（就是设置页：卡密激活 + 购买入口 + 撤销授权） */
+    private fun openAuthPage() { openSettingsPage() }
 
     /** 首次启动：简易使用教程（可关闭，只弹一次） */
     private fun maybeShowTutorial() {
@@ -606,13 +628,7 @@ class MainActivity : Activity() {
             setItemsCanFocus(false)
             onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
                 if (pos == 0) {
-                    try { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
-                    catch (e: Exception) {
-                        statusText.text = "打开设置失败: ${e.javaClass.simpleName}: ${e.message}"
-                        android.widget.Toast.makeText(this@MainActivity, "打开设置失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                        return@OnItemClickListener
-                    }
-                    hidePanel(); return@OnItemClickListener
+                    openSettingsPage(); hidePanel(); return@OnItemClickListener
                 }
                 if (pos == 0) return@OnItemClickListener
                 curGroupPos = pos - 1
@@ -943,13 +959,7 @@ class MainActivity : Activity() {
                     if (panelCol == 0) {
                         val np = groupAdapter?.selected ?: 0
                         if (np == 0) {
-                            // 保险：打开失败要能在屏幕上看到原因，便于排查
-                            try { startActivity(Intent(this, SettingsActivity::class.java)) }
-                            catch (e: Exception) {
-                                statusText.text = "打开设置失败: ${e.javaClass.simpleName}: ${e.message}"
-                                android.widget.Toast.makeText(this@MainActivity, "打开设置失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
-                                return true
-                            }
+                            openSettingsPage()   // 统一走带诊断的入口
                             hidePanel()
                         }
                         else { curGroupPos = np - 1; updateChannelListOfGroup(curGroupPos); panelCol = 1; refreshPanelHighlight() }
@@ -967,7 +977,8 @@ class MainActivity : Activity() {
             // ★ 修复：返回键必须弹退出确认，绝不直接 finish（原来漏了这个分支，
             //   导致 BACK 落到 super.onKeyDown() = 系统默认无提示退出）
             KeyEvent.KEYCODE_BACK -> { exitApp(); return true }
-            KeyEvent.KEYCODE_MENU -> { autoSwitchLine(); return true }
+            // ★ 菜单键 → 打开设置页（原来这里是「换线」，换线已移到设置页里）
+            KeyEvent.KEYCODE_MENU -> { openSettingsPage(); return true }
             KeyEvent.KEYCODE_CHANNEL_UP -> { playChannel((currentChannel - 1 + channels.size) % channels.size); return true }
             KeyEvent.KEYCODE_CHANNEL_DOWN -> { playChannel((currentChannel + 1) % channels.size); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -1308,6 +1319,14 @@ class MainActivity : Activity() {
             val idx = channels.indexOfFirst { it.num == playRequested }
             playRequested = -1
             if (idx >= 0) playChannel(idx)
+        }
+        // 设置页点「切换线路」→ 回来执行（原菜单键功能，现已移到设置页）
+        run {
+            val sp = getSharedPreferences("iptv_main", MODE_PRIVATE)
+            if (sp.getString("pending_action", "") == "switch_line") {
+                sp.edit().remove("pending_action").apply()
+                autoSwitchLine()
+            }
         }
     }
 
