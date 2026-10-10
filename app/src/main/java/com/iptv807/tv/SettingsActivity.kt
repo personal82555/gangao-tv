@@ -203,8 +203,12 @@ class SettingsActivity : Activity() {
             root.addView(TextView(this).apply {
                 text = "✓ 已经是会员"
                 textSize = 18f; setTextColor(Color.parseColor("#4CAF50"))
-                gravity = Gravity.CENTER; setPadding(0, 24, 0, 24)
+                gravity = Gravity.CENTER; setPadding(0, 24, 0, 12)
             })
+            // ★ 新增：撤销本机授权（换机 / 换卡密前先解绑）
+            val revokeBtn = mkAction("撤销本机授权（可重新激活 / 换卡密）") { doRevoke() }
+            root.addView(revokeBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 20 })
         } else {
             val btn = mkAction("支付成为会员（月/季/年）") {
                 startActivity(Intent(this@SettingsActivity, ShopActivity::class.java))
@@ -212,6 +216,26 @@ class SettingsActivity : Activity() {
             root.addView(btn, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
+    }
+
+    /** 撤销本机授权：清除本地授权信息 → 恢复免费模式，可重新输入卡密或换机 */
+    private fun doRevoke() {
+        try {
+            getSharedPreferences("iptv_license", MODE_PRIVATE).edit()
+                .putBoolean("is_vip", false)
+                .putString("card_key", "")
+                .putString("vip_expire", "")
+                .putBoolean("is_permanent", false)
+                .remove("token")
+                .apply()
+        } catch (e: Exception) { }
+        statusText.text = "✓ 已撤销本机授权\n当前为免费用户（每天 1 小时）\n可在下方重新输入卡密激活"
+        android.widget.Toast.makeText(this, "已撤销授权，可重新激活", android.widget.Toast.LENGTH_LONG).show()
+        // 重开本页以刷新界面状态（会员按钮 ↔ 支付按钮）
+        try {
+            startActivity(Intent(this@SettingsActivity, SettingsActivity::class.java))
+            finish()
+        } catch (e: Exception) { }
     }
 
     /** 输入卡密激活 */

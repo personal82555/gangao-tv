@@ -97,6 +97,11 @@ class MainActivity : Activity() {
     private var downT = 0L
     private var exitHint: TextView? = null
     private var confirmOverlay: View? = null
+    /** 右上角「立即授权」按钮（未授权时显示） */
+    private var authBtn: TextView? = null
+    /** 首次启动简易教程遮罩 */
+    private var tutorialOverlay: View? = null
+    private var tutorialVisible = false
     // 安装统计 + 版本推送
     private var updateOverlay: View? = null
     private var pendingUpdate: AuthApi.UpdateInfo? = null
@@ -178,14 +183,35 @@ class MainActivity : Activity() {
         root.addView(statusText, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // 4) 右上：免费时长 + 模式
-        val rightCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        // 4) 右上：免费时长 + 模式 + 【立即授权】按钮（横排，按钮在倒计时右边）
+        val rightCol = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         trialText = TextView(this).apply {
             textSize = 14f; setTextColor(Color.WHITE)
             setBackgroundColor(0x88000000u.toInt())
             setPadding(20, 10, 20, 10)
         }
         rightCol.addView(trialText)
+
+        authBtn = TextView(this).apply {
+            text = "🔑 立即授权"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0xFF1B6EF3.toInt())
+            setPadding(26, 10, 26, 10)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            visibility = View.GONE          // 授权成功后隐藏
+            // 遥控器聚焦高亮：蓝底加白框
+            val pad = (4 * resources.displayMetrics.density).toInt()
+            setOnFocusChangeListener { v, has ->
+                v.setBackgroundColor(if (has) 0xFF3D8BFF.toInt() else 0xFF1B6EF3.toInt())
+                v.setPadding(26, 10, 26, 10)
+                if (has) v.alpha = 1f else v.alpha = 0.95f
+            }
+            setOnClickListener { openAuthPage() }
+        }
+        rightCol.addView(authBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = 8 })
         val rcLP = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)
         root.addView(rightCol, rcLP)
@@ -280,6 +306,8 @@ class MainActivity : Activity() {
             // 启动后预取默认频道的相邻频道（很轻量，1 个一个来）
             handler.postDelayed({ schedulePrefetch(channels.getOrNull(defIdx)) }, 2000)
         }
+        // 新安装首次打开 → 简易使用教程（可关闭，只弹一次）
+        maybeShowTutorial()
     }
 
     private fun setMode(m: Int) { mode = m }
@@ -319,15 +347,123 @@ class MainActivity : Activity() {
             runOnUiThread {
                 isVip = r.ok
                 prefs.edit().putBoolean("is_vip", r.ok).apply()
-                if (r.ok) { trialText.visibility = View.GONE; trialText.text = "VIP" } else enterFreeMode()
+                if (r.ok) { trialText.visibility = View.GONE; trialText.text = "VIP"; showAuthButton(false) } else enterFreeMode()
             }
         }.start()
     }
 
     private fun enterFreeMode() {
         trialText.visibility = View.VISIBLE
+        showAuthButton(true)
         handler.removeCallbacks(uiTick)
         handler.post(uiTick)
+    }
+
+    /** 显示/隐藏右上角「立即授权」按钮 */
+    private fun showAuthButton(show: Boolean) {
+        runOnUiThread {
+            val b = authBtn ?: return@runOnUiThread
+            b.visibility = if (show) View.VISIBLE else View.GONE
+            if (show) {
+                // 首次出现时自动聚焦，遥控器按 OK 直接进授权页
+                b.postDelayed({
+                    if (b.visibility == View.VISIBLE && !isPanelVisible() && tutorialOverlay?.visibility != View.VISIBLE) {
+                        b.requestFocus()
+                    }
+                }, 600)
+            } else {
+                b.clearFocus()
+            }
+        }
+    }
+
+    /** 打开授权/激活页面（含卡密激活与购买入口） */
+    private fun openAuthPage() {
+        try {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        } catch (e: Exception) {
+            statusText.text = "打开授权页失败: ${e.javaClass.simpleName}: ${e.message}"
+            android.widget.Toast.makeText(this, "打开授权页失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** 首次启动：简易使用教程（可关闭，只弹一次） */
+    private fun maybeShowTutorial() {
+        try {
+            if (getSharedPreferences("iptv_main", MODE_PRIVATE).getBoolean("tutorial_done", false)) return
+
+            val mask = FrameLayout(this).apply {
+                setBackgroundColor(0xE6000000.toInt())
+                isClickable = true   // 挡住底层点击
+            }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(0xFF161B26.toInt())
+                setPadding(64, 48, 64, 56)
+            }
+            card.addView(TextView(this).apply {
+                text = "📺 欢迎使用「港澳台直播」"
+                textSize = 24f; setTextColor(Color.WHITE); setPadding(0, 0, 0, 6)
+            })
+            card.addView(TextView(this).apply {
+                text = "花 30 秒知道怎么用，功能一个不少"
+                textSize = 14f; setTextColor(0xFF93A1B8.toInt()); setPadding(0, 0, 0, 26)
+            })
+
+            val steps = listOf(
+                "1️⃣  按遥控器 OK 键 → 打开选台面板",
+                "2️⃣  上下键选频道（选中行蓝底高亮），左右键切换香港 / 澳门 / 台湾分组",
+                "3️⃣  直接按数字键 → 快速跳到对应频道（按 9 就是 9 号台）",
+                "4️⃣  菜单键 → 收藏 / 取消收藏当前频道",
+                "5️⃣  连滑两次 或 按返回键 → 退出应用（都会先弹确认框）",
+                "6️⃣  断线自动重连、10 条线路自动切换，画面卡住点「▶ 继续播放」即可"
+            )
+            for (t in steps) {
+                card.addView(TextView(this).apply {
+                    text = t; textSize = 16f; setTextColor(0xFFE6ECF7.toInt())
+                    setLineSpacing(0f, 1.35f); setPadding(0, 9, 0, 9)
+                })
+            }
+
+            val okBtn = android.widget.Button(this).apply {
+                text = "知道了，开始观看"
+                textSize = 17f
+                isFocusable = true; isFocusableInTouchMode = true
+                setBackgroundColor(0xFF1B6EF3.toInt())
+                setTextColor(Color.WHITE)
+                setOnClickListener { closeTutorial() }
+            }
+            card.addView(okBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = 34 })
+
+            val scroll = android.widget.ScrollView(this).apply {
+                setBackgroundColor(Color.TRANSPARENT)
+                isFillViewport = true
+                addView(card)
+            }
+            mask.addView(scroll, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER
+            ).apply { setMargins(260, 90, 260, 90) })
+
+            root.addView(mask, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            tutorialOverlay = mask
+            tutorialVisible = true
+            okBtn.post { okBtn.requestFocus() }   // 遥控器 OK 直接关闭
+        } catch (e: Exception) {
+            // 教程失败不能影响正常播放
+            tutorialVisible = false
+        }
+    }
+
+    /** 关闭教程并记住（之后不再显示） */
+    private fun closeTutorial() {
+        tutorialVisible = false
+        try {
+            getSharedPreferences("iptv_main", MODE_PRIVATE).edit().putBoolean("tutorial_done", true).apply()
+        } catch (e: Exception) { }
+        root.removeView(tutorialOverlay)
+        tutorialOverlay = null
     }
 
     private fun onUiTick() {
@@ -439,7 +575,12 @@ class MainActivity : Activity() {
             setItemsCanFocus(false)
             onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
                 if (pos == 0) {
-                    startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                    try { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
+                    catch (e: Exception) {
+                        statusText.text = "打开设置失败: ${e.javaClass.simpleName}: ${e.message}"
+                        android.widget.Toast.makeText(this@MainActivity, "打开设置失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        return@OnItemClickListener
+                    }
                     hidePanel(); return@OnItemClickListener
                 }
                 if (pos == 0) return@OnItemClickListener
@@ -679,10 +820,32 @@ class MainActivity : Activity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // 首次教程显示时：返回/OK 都可关闭
+        if (tutorialVisible) {
+            if (keyCode == KeyEvent.KEYCODE_BACK ||
+                keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                keyCode == KeyEvent.KEYCODE_ENTER) {
+                closeTutorial(); return true
+            }
+            return true
+        }
         // 退出确认框显示时：返回=取消，其余交给按钮焦点系统处理（左右切换，OK 确认）
         if (confirmVisible) {
             if (keyCode == KeyEvent.KEYCODE_BACK) { hideExitConfirm(); return true }
             return super.onKeyDown(keyCode, event)
+        }
+        // 右上角「立即授权」按钮聚焦时：OK 进授权页，返回取消聚焦，方向键清焦点后继续正常换台
+        if (authBtn?.visibility == View.VISIBLE && authBtn?.isFocused == true) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    openAuthPage(); return true
+                }
+                KeyEvent.KEYCODE_BACK -> { authBtn?.clearFocus(); return true }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    authBtn?.clearFocus()   // 不 return：落到下面正常换台/开面板逻辑
+                }
+            }
         }
         // 「继续播放」按钮可见时，遥控 OK/确认 直接触发
         if (resumeBtn?.visibility == View.VISIBLE &&
@@ -748,7 +911,16 @@ class MainActivity : Activity() {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                     if (panelCol == 0) {
                         val np = groupAdapter?.selected ?: 0
-                        if (np == 0) { startActivity(Intent(this, SettingsActivity::class.java)); hidePanel() }
+                        if (np == 0) {
+                            // 保险：打开失败要能在屏幕上看到原因，便于排查
+                            try { startActivity(Intent(this, SettingsActivity::class.java)) }
+                            catch (e: Exception) {
+                                statusText.text = "打开设置失败: ${e.javaClass.simpleName}: ${e.message}"
+                                android.widget.Toast.makeText(this@MainActivity, "打开设置失败: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                return true
+                            }
+                            hidePanel()
+                        }
                         else { curGroupPos = np - 1; updateChannelListOfGroup(curGroupPos); panelCol = 1; refreshPanelHighlight() }
                     } else {
                         val pos = channelAdapter?.selected ?: -1
@@ -761,6 +933,9 @@ class MainActivity : Activity() {
         }
 
         when (keyCode) {
+            // ★ 修复：返回键必须弹退出确认，绝不直接 finish（原来漏了这个分支，
+            //   导致 BACK 落到 super.onKeyDown() = 系统默认无提示退出）
+            KeyEvent.KEYCODE_BACK -> { exitApp(); return true }
             KeyEvent.KEYCODE_MENU -> { autoSwitchLine(); return true }
             KeyEvent.KEYCODE_CHANNEL_UP -> { playChannel((currentChannel - 1 + channels.size) % channels.size); return true }
             KeyEvent.KEYCODE_CHANNEL_DOWN -> { playChannel((currentChannel + 1) % channels.size); return true }
@@ -1066,7 +1241,12 @@ class MainActivity : Activity() {
             if (nowVip && (card.isNotEmpty() || !isVip)) {
                 isVip = true
                 trialText.visibility = View.GONE
+                showAuthButton(false)
                 handler.removeCallbacks(uiTick)
+            } else if (!nowVip && isVip) {
+                // ★ 设置页里撤销了授权 → 回到免费模式（倒计时 + 立即授权按钮都恢复）
+                isVip = false
+                enterFreeMode()
             }
         }
         // 从桌面/设置返回：先尝试续播，失败则显示「继续播放」按钮
