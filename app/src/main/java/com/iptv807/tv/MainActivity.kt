@@ -104,6 +104,15 @@ class MainActivity : Activity() {
     /** 首次启动简易教程遮罩 */
     private var tutorialOverlay: View? = null
     private var tutorialVisible = false
+    /** 公告弹窗（授权系统 AnnouncementController 发布的） */
+    private var annOverlay: View? = null
+    private var annVisible = false
+    private var annOkBtn: TextView? = null
+    private var annTitle: TextView? = null
+    private var annBody: TextView? = null
+    private var annTypeTv: TextView? = null
+    private var curAnnId = 0
+    private var annRetry = 0
     /** 更新弹窗的可聚焦按钮 + 当前焦点索引（遥控器左右切换用） */
     private var updBtns: Array<TextView?> = emptyArray()
     private var updFocusIdx = 0
@@ -321,6 +330,7 @@ class MainActivity : Activity() {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         checkLicense()
         startInstallTracking()   // 安装统计 + 检查新版本
+        fetchAnnouncement()      // ★ 拉取授权系统公告（3 秒后，避开启动高峰；更新弹窗优先）
         if (savedInstanceState == null && channels.isNotEmpty()) {
             val defIdx = channels.indexOfFirst { it.name.contains("TVB翡翠台") }.let { if (it >= 0) it else 0 }
             playChannel(defIdx)
@@ -902,6 +912,18 @@ class MainActivity : Activity() {
             }
         }
 
+        // ★ 公告弹窗显示时：按键由弹窗接管（OK/返回都 = 确认关闭；吞掉数字键/菜单键）
+        if (isAnnDialogVisible()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_BACK,
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_SPACE -> {
+                    hideAnnouncement(); return true
+                }
+                else -> return true
+            }
+        }
+
         // 退出确认框显示时：返回=取消，其余交给按钮焦点系统处理（左右切换，OK 确认）
         if (confirmVisible) {
             if (keyCode == KeyEvent.KEYCODE_BACK) { hideExitConfirm(); return true }
@@ -1098,6 +1120,131 @@ class MainActivity : Activity() {
         handler.removeCallbacks(heartbeatTask)
         handler.postDelayed(heartbeatTask, 60 * 1000L)   // 1 分钟后首次心跳
     }
+
+    /**
+     * 拉取授权系统公告，若有「弹窗」开关打开且未读过的，则弹给用户看。
+     * 去重：iptv_main 的 ann_seen_id 记录最后看过的公告 id，同一条只弹一次。
+     */
+    private fun fetchAnnouncement(delayMs: Long = 3000L) {
+        handler.postDelayed({
+            Thread {
+                val list = try { AuthApi.fetchAnnouncements(projectId = 2, limit = 10) }
+                           catch (e: Exception) { emptyList() }
+                // 只弹 is_popup=1 的；按 id 升序取最新一条未读
+                val sp = getSharedPreferences("iptv_main", MODE_PRIVATE)
+                val seen = sp.getInt("ann_seen_id", 0)
+                val target = list.filter { it.isPopup && it.id > seen }
+                                 .maxByOrNull { it.id }
+                if (target != null) {
+                    runOnUiThread {
+                        // 更新弹窗优先：它没关掉就延迟再试（最多 15 次 x 2 秒）
+                        if (isUpdateDialogVisible() && annRetry < 15) {
+                            annRetry++
+                            fetchAnnouncement(2000L)
+                        } else if (!annVisible) {
+                            showAnnouncement(target)
+                        }
+                    }
+                }
+            }.start()
+        }, delayMs)
+    }
+
+    /** 公告弹窗（自绘，和更新弹窗同一套三件套：focusable + requestFocus + onKeyDown 分支） */
+    private fun showAnnouncement(a: AuthApi.Announcement) {
+        if (annOverlay == null) {
+            val dm = resources.displayMetrics
+            val wDp = dm.widthPixels / dm.density
+            val sc = when {
+                wDp < 500f -> 0.62f      // 手机竖屏
+                wDp < 760f -> 0.80f      // 手机横屏 / 小平板
+                else       -> 1.00f      // TV
+            }
+            fun sp(v: Float): Float = v * sc
+            fun px(v: Int): Int = (v * sc).toInt()
+
+            val mask = FrameLayout(this).apply { setBackgroundColor(0xCC000000u.toInt()); isClickable = true }
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(Color.parseColor("#22262E"))
+                setPadding(px(56), px(40), px(56), px(40))
+            }
+            annTypeTv = TextView(this).apply {
+                tag = "anntype"; textSize = sp(16f); setTextColor(Color.parseColor("#FFC107"))
+                gravity = Gravity.CENTER; setPadding(0, 0, 0, px(14))
+            }
+            card.addView(annTypeTv)
+            annTitle = TextView(this).apply {
+                tag = "anntitle"; textSize = sp(22f); setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER; setLineSpacing(0f, 1.25f); setPadding(0, 0, 0, px(16))
+            }
+            card.addView(annTitle)
+            annBody = TextView(this).apply {
+                tag = "annbody"; textSize = sp(15f); setTextColor(Color.parseColor("#D8DEE9"))
+                setBackgroundColor(Color.parseColor("#1C2028"))
+                setPadding(px(24), px(20), px(24), px(20)); setLineSpacing(0f, 1.3f)
+                maxLines = 8; ellipsize = android.text.TextUtils.TruncateAt.END
+                maxHeight = (dm.heightPixels * 0.34f).toInt()
+            }
+            card.addView(annBody)
+            annOkBtn = TextView(this).apply {
+                tag = "annok"; text = "确认关闭"; textSize = sp(18f)
+                setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                setPadding(px(64), px(22), px(64), px(22))
+                isFocusable = true; isFocusableInTouchMode = true
+                background = android.graphics.drawable.StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_focused),
+                        android.graphics.drawable.ColorDrawable(Color.parseColor("#1B6EF3")))
+                    addState(intArrayOf(),
+                        android.graphics.drawable.ColorDrawable(Color.parseColor("#3A4150")))
+                }
+                setOnClickListener { hideAnnouncement() }
+            }
+            val rowLp = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = px(28) }
+            card.addView(annOkBtn, rowLp)
+
+            val cardW = (dm.widthPixels * 0.90f).toInt()
+            mask.addView(card, FrameLayout.LayoutParams(
+                cardW, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            root.addView(mask, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            annOverlay = mask
+        }
+        val typeLabel = when (a.type) {
+            "system" -> "🔔 系统公告"
+            "update" -> "🔄 更新公告"
+            "promo"  -> "🎁 活动公告"
+            else     -> "📢 通知公告"
+        }
+        curAnnId = a.id
+        annTypeTv?.text = typeLabel
+        annTitle?.text  = a.title.ifEmpty { "公告" }
+        annBody?.text   = a.content.ifEmpty { "（无内容）" }
+        annOverlay?.visibility = View.VISIBLE
+        annVisible = true
+        // ★ 三件套之二：主动聚焦（否则遥控器按 OK 不命中）
+        handler.postDelayed({
+            if (annVisible) annOkBtn?.requestFocus()
+        }, 120)
+    }
+
+    private fun hideAnnouncement() {
+        // ★ 去重：记录已读的最大公告 id，同一条不再弹（新公告 id 更大，仍会弹）
+        try {
+            val sp = getSharedPreferences("iptv_main", MODE_PRIVATE)
+            val seen = sp.getInt("ann_seen_id", 0)
+            if (curAnnId > seen) sp.edit().putInt("ann_seen_id", curAnnId).apply()
+        } catch (e: Exception) { }
+        curAnnId = 0
+        annOverlay?.visibility = View.GONE
+        annVisible = false
+        annOkBtn?.clearFocus()                      // 三件套之四：清焦点残留
+        annRetry = 0
+    }
+
+    private fun isAnnDialogVisible(): Boolean = annOverlay?.visibility == View.VISIBLE
 
     /** 新版本提示（自绘浮层，电视全屏主题下 AlertDialog 不可靠） */
     private fun showUpdateDialog(info: AuthApi.UpdateInfo) {

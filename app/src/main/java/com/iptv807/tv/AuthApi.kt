@@ -45,6 +45,18 @@ object AuthApi {
         val installId: Long = 0
     )
 
+    /** 授权系统公告（AnnouncementController → GET /api/public/announcements） */
+    data class Announcement(
+        val id: Int = 0,
+        val title: String = "",
+        val content: String = "",
+        val type: String = "notice",     // system / update / promo / notice
+        val isTop: Boolean = false,
+        val isPopup: Boolean = false,    // 后台「弹窗」开关
+        val linkUrl: String = "",
+        val createdAt: String = ""
+    )
+
     /** 当前应用版本号（用于 client_version 与版本比较） */
     fun clientVersion(ctx: Context): String = try {
         ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "0.0.0"
@@ -93,6 +105,39 @@ object AuthApi {
         return info
     }
 
+    /**
+     * 拉取授权系统公告（网络请求，必须放后台线程）
+     * GET /api/public/announcements?target=client&project_id=2&limit=10
+     *   无需 X-Api-Key（实测无 Key 也 200）
+     *   过滤：status=1 + 生效期内 + target∈{all,client} + project_id∈{null,2}
+     * 返回：data.list 全部有效公告；data.popup 里 is_popup=1 的（后台"弹窗"开关）
+     */
+    fun fetchAnnouncements(projectId: Int = 2, limit: Int = 10): List<Announcement> {
+        val path = "/api/public/announcements?target=client&project_id=$projectId&limit=" +
+                limit.coerceIn(1, 50)
+        val r = get(path)
+        if (r.optInt("code", 0) != 200) {
+            lastError = "公告 code=${r.optInt("code", 0)} ${r.optString("message")}"
+            return emptyList()
+        }
+        val arr = r.optJSONObject("data")?.optJSONArray("list") ?: return emptyList()
+        val out = ArrayList<Announcement>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            out.add(Announcement(
+                id = o.optInt("id", 0),
+                title = o.optString("title"),
+                content = o.optString("content"),
+                type = o.optString("type", "notice"),
+                isTop = o.optInt("is_top", 0) == 1,
+                isPopup = o.optInt("is_popup", 0) == 1,
+                linkUrl = o.optString("link_url"),
+                createdAt = o.optString("created_at")
+            ))
+        }
+        return out
+    }
+
     /** 心跳：仅更新在线时间（网络请求，必须放后台线程） */
     @JvmOverloads
     fun heartbeat(machineId: String, cardKey: String = "", ctx: Context? = null): Boolean {
@@ -105,6 +150,25 @@ object AuthApi {
         val ok = r.optInt("code", 0) == 200
         lastError = if (ok) "hb ok" else "hb ${r.optString("message")}"
         return ok
+    }
+
+    /** GET 请求（公告接口是 GET，且不需要 X-Api-Key） */
+    private fun get(path: String): JSONObject = try {
+        val conn = (URL(BASE + path).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10_000
+            readTimeout = 15_000
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "iptv807-tv")
+        }
+        val code = conn.responseCode
+        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+        val text = stream?.bufferedReader()?.use(BufferedReader::readText) ?: ""
+        conn.disconnect()
+        JSONObject(if (text.isBlank()) "{}" else text)
+    } catch (e: Exception) {
+        lastError = "GET ${e.javaClass.simpleName}: ${e.message}"
+        JSONObject()
     }
 
     private fun post(path: String, body: JSONObject): JSONObject {
