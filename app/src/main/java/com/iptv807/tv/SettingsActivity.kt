@@ -197,6 +197,21 @@ class SettingsActivity : Activity() {
 
         val actBtn = mkAction("激活") { doActivate(cardInput.text.toString().trim()) }
         root.addView(actBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 24 })
+
+        // ===== ★ 售后联系方式（授权无效 / 卡密用不了时能找到人）=====
+        root.addView(TextView(this).apply {
+            text = "⚠ 授权无效、卡密激活不了？\n售后微信：q3970260761"
+            textSize = 16f
+            setTextColor(Color.parseColor("#FFC107"))          // 橙色醒目
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.3f)
+            setPadding(24, 18, 24, 18)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            background = focusBg(normal = 0xFF2E2510.toInt())  // 橙底，聚焦变蓝
+            setOnClickListener { copyWechat() }
+        }, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 40 })
 
         if (isVip) {
@@ -243,6 +258,18 @@ class SettingsActivity : Activity() {
         } catch (e: Exception) { }
     }
 
+    /** 复制售后微信号（TV 上也会 Toast 出来便于手抄） */
+    private fun copyWechat() {
+        val wx = "q3970260761"
+        try {
+            val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("wechat", wx))
+            android.widget.Toast.makeText(this, "微信号已复制：$wx", android.widget.Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "售后微信：$wx", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     /** 撤销本机授权：清除本地授权信息 → 恢复免费模式，可重新输入卡密或换机 */
     private fun doRevoke() {
         try {
@@ -284,7 +311,7 @@ class SettingsActivity : Activity() {
                 statusText.text = if (r.ok) {
                     "✓ 激活成功！\n${if (r.isPermanent) "永久有效" else "有效期至：${r.expireTime}"}\n卡号：$key"
                 } else {
-                    "✗ 激活失败：${r.message}\n请检查卡密是否正确 / 是否已被使用"
+                    "✗ 激活失败：${r.message}\n请检查卡密是否正确 / 是否已被使用\n\n售后微信：q3970260761（可点下方橙色条复制）"
                 }
                 android.widget.Toast.makeText(this@SettingsActivity,
                     if (r.ok) "激活成功" else "激活失败：${r.message}",
