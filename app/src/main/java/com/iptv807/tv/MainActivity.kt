@@ -1102,35 +1102,49 @@ class MainActivity : Activity() {
     /** 新版本提示（自绘浮层，电视全屏主题下 AlertDialog 不可靠） */
     private fun showUpdateDialog(info: AuthApi.UpdateInfo) {
         if (updateOverlay == null) {
+            // ★ 尺寸自适应：原字号/内边距按 TV 写死且卡片宽度无约束，手机竖屏会溢出
+            val dm = resources.displayMetrics
+            val wDp = dm.widthPixels / dm.density
+            val s = when {
+                wDp < 500f -> 0.62f    // 手机竖屏（约 360-430dp 宽）
+                wDp < 760f -> 0.80f    // 手机横屏 / 小平板
+                else       -> 1.00f    // 电视 / 平板横屏（960dp+）保持原样
+            }
+            fun sp(v: Float): Float = v * s
+            fun px(v: Int): Int = (v * s).toInt()
+
             val mask = FrameLayout(this).apply { setBackgroundColor(0xCC000000u.toInt()) }
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(Color.parseColor("#22262E"))
-                setPadding(64, 48, 64, 48)
+                setPadding(px(64), px(48), px(64), px(48))
             }
             card.addView(TextView(this).apply {
-                text = "发现新版本"; textSize = 24f; setTextColor(Color.WHITE)
-                gravity = Gravity.CENTER; setPadding(0, 0, 0, 12)
+                text = "发现新版本"; textSize = sp(24f); setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER; setPadding(0, 0, 0, px(12))
             })
             card.addView(TextView(this).apply {
-                tag = "ver"; textSize = 40f; setTextColor(Color.parseColor("#4CAF50"))
-                gravity = Gravity.CENTER; setPadding(0, 0, 0, 16)
+                tag = "ver"; textSize = sp(40f); setTextColor(Color.parseColor("#4CAF50"))
+                gravity = Gravity.CENTER; setPadding(0, 0, 0, px(16))
             })
             card.addView(TextView(this).apply {
-                tag = "meta"; textSize = 15f; setTextColor(Color.LTGRAY)
-                gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f); setPadding(0, 0, 0, 24)
+                tag = "meta"; textSize = sp(15f); setTextColor(Color.LTGRAY)
+                gravity = Gravity.CENTER; setLineSpacing(0f, 1.2f); setPadding(0, 0, 0, px(24))
             })
             card.addView(TextView(this).apply {
-                tag = "chg"; textSize = 15f; setTextColor(Color.WHITE)
+                tag = "chg"; textSize = sp(15f); setTextColor(Color.WHITE)
                 setBackgroundColor(Color.parseColor("#1C2028"))
-                setPadding(24, 20, 24, 20); setLineSpacing(0f, 1.25f)
-                maxLines = 8; gravity = Gravity.CENTER
+                setPadding(px(24), px(20), px(24), px(20)); setLineSpacing(0f, 1.25f)
+                // ★ 限行 + 省略 + 高度上限：长 changelog 不再把卡片撑出屏幕
+                maxLines = 6; ellipsize = android.text.TextUtils.TruncateAt.END
+                maxHeight = (dm.heightPixels * 0.34f).toInt()
+                gravity = Gravity.CENTER
             })
-            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, 28, 0, 0) }
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, px(28), 0, 0) }
             fun mkBtn(label: String, focusable: Boolean, onClick: () -> Unit): TextView =
                 TextView(this).apply {
-                    text = label; textSize = 18f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-                    setPadding(56, 22, 56, 22); isFocusable = focusable; isFocusableInTouchMode = focusable
+                    text = label; textSize = sp(18f); setTextColor(Color.WHITE); gravity = Gravity.CENTER
+                    setPadding(px(56), px(22), px(56), px(22)); isFocusable = focusable; isFocusableInTouchMode = focusable
                     if (focusable) background = android.graphics.drawable.StateListDrawable().apply {
                         addState(intArrayOf(android.R.attr.state_focused),
                             android.graphics.drawable.ColorDrawable(Color.parseColor("#1B6EF3")))
@@ -1144,12 +1158,14 @@ class MainActivity : Activity() {
                 pendingUpdate?.let { startUpdateDownload(it) }; hideUpdateDialog()
             }.apply { tag = "dl" }
             row.addView(laterBtn, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = 32 })
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = px(32) })
             row.addView(dlBtn, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             card.addView(row)
+            // ★ 卡片宽度 = 屏幕 90%（左右各留 5%），任何屏幕都不会溢出
+            val cardW = (dm.widthPixels * 0.90f).toInt()
             mask.addView(card, FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+                cardW, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             root.addView(mask, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             updateOverlay = mask
