@@ -104,6 +104,10 @@ class MainActivity : Activity() {
     /** 首次启动简易教程遮罩 */
     private var tutorialOverlay: View? = null
     private var tutorialVisible = false
+    /** 更新弹窗的可聚焦按钮 + 当前焦点索引（遥控器左右切换用） */
+    private var updBtns: Array<TextView?> = emptyArray()
+    private var updFocusIdx = 0
+    private var updForce = false
     // 安装统计 + 版本推送
     private var updateOverlay: View? = null
     private var pendingUpdate: AuthApi.UpdateInfo? = null
@@ -876,6 +880,28 @@ class MainActivity : Activity() {
             }
             return true
         }
+        // ★ 更新弹窗显示时：所有按键都由弹窗接管。
+        //   否则会落到下面的 showPanel()/exitApp()/换台 —— 遥控器就"选不了"了
+        if (isUpdateDialogVisible()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_BACK -> { hideUpdateDialog(); return true }
+
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_SPACE -> {
+                    val btn = updBtns.getOrNull(updFocusIdx)
+                        ?.takeIf { it.visibility == View.VISIBLE }
+                        ?: updBtns.filterNotNull().firstOrNull { it.visibility == View.VISIBLE }
+                    btn?.performClick()
+                    return true
+                }
+
+                KeyEvent.KEYCODE_DPAD_LEFT,  KeyEvent.KEYCODE_DPAD_UP   -> { moveUpdateFocus(-1); return true }
+                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_DOWN -> { moveUpdateFocus( 1); return true }
+
+                else -> return true   // 数字键 / 菜单键 等全部吞掉（弹窗期间不能换台、不能进设置）
+            }
+        }
+
         // 退出确认框显示时：返回=取消，其余交给按钮焦点系统处理（左右切换，OK 确认）
         if (confirmVisible) {
             if (keyCode == KeyEvent.KEYCODE_BACK) { hideExitConfirm(); return true }
@@ -1112,10 +1138,11 @@ class MainActivity : Activity() {
                     } else setBackgroundColor(Color.parseColor("#2A2F3A"))
                     setOnClickListener { onClick() }
                 }
-            val laterBtn = mkBtn("稍后", true) { hideUpdateDialog() }
-            val dlBtn = mkBtn("立即更新", false) {
+            // ★ 两个按钮都必须可聚焦，否则遥控器永远选不到「立即更新」
+            val laterBtn = mkBtn("稍后", true) { hideUpdateDialog() }.apply { tag = "later" }
+            val dlBtn = mkBtn("立即更新", true) {
                 pendingUpdate?.let { startUpdateDownload(it) }; hideUpdateDialog()
-            }
+            }.apply { tag = "dl" }
             row.addView(laterBtn, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { rightMargin = 32 })
             row.addView(dlBtn, LinearLayout.LayoutParams(
@@ -1137,12 +1164,48 @@ class MainActivity : Activity() {
         meta.text = "当前 v${AuthApi.clientVersion(this)}" + (if (mb.isNotEmpty()) "  ·  $mb" else "") +
                 (if (force) "\n⚠ 请升级到此版本" else "")
         chg.text = info.changelog.ifEmpty { "本次更新包含功能优化与问题修复" }
+
+        // ★ 强制更新时不给「稍后」（原代码只写了注释没实现）
+        val laterB = updateOverlay!!.findViewWithTag<TextView>("later")
+        val dlB = updateOverlay!!.findViewWithTag<TextView>("dl")
+        updForce = info.updateRequired || (info.minClientVersion.isNotEmpty() &&
+                compareVersion(AuthApi.clientVersion(this), info.minClientVersion) < 0)
+        laterB?.visibility = if (updForce) View.GONE else View.VISIBLE
+        // 可见的按钮列表（强制更新时只剩「立即更新」）
+        updBtns = arrayOf(if (updForce) null else laterB, dlB)
+        updFocusIdx = if (updForce) 1 else 1   // 默认聚焦「立即更新」（主操作）
+
         updateOverlay!!.visibility = View.VISIBLE
-        // 强制更新时不给"稍后"
-        updateOverlay!!.findViewWithTag<TextView>("ver") // touch to ensure rendered
+        // ★ 必须主动聚焦，否则遥控器按 OK 不会命中任何按钮
+        handler.postDelayed({
+            if (updateOverlay?.visibility == View.VISIBLE) {
+                updBtns.getOrNull(updFocusIdx)?.requestFocus()
+            }
+        }, 120)
     }
 
-    private fun hideUpdateDialog() { updateOverlay?.visibility = View.GONE }
+    private fun hideUpdateDialog() {
+        updateOverlay?.visibility = View.GONE
+        // 清掉焦点，避免残留焦点挡住后续按键
+        updBtns.forEach { it?.clearFocus() }
+        updFocusIdx = 0
+    }
+
+    /** 更新弹窗内切换按钮焦点（遥控器左右/上下） */
+    private fun moveUpdateFocus(delta: Int) {
+        val visible = updBtns.filterNotNull().filter { it.visibility == View.VISIBLE }
+        if (visible.isEmpty()) return
+        val cur = updBtns.getOrNull(updFocusIdx)
+        var i = visible.indexOf(cur)
+        if (i < 0) i = 0
+        i = (i + delta + visible.size) % visible.size
+        val target = visible[i]
+        updFocusIdx = updBtns.indexOf(target)
+        target.requestFocus()
+    }
+
+    /** 更新弹窗是否显示 */
+    private fun isUpdateDialogVisible(): Boolean = updateOverlay?.visibility == View.VISIBLE
 
     /** 比较 "9.10.0" vs "9.3.0" 之类 */
     fun compareVersion(a: String, b: String): Int {
