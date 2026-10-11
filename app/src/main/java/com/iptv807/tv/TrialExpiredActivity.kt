@@ -48,16 +48,40 @@ class TrialExpiredActivity : Activity() {
             gravity = android.view.Gravity.CENTER; setPadding(0, 0, 0, 56)
         })
 
-        root.addView(Button(this).apply {
-            text = "购买套餐（OK键）"
-            textSize = 19f
-            setOnClickListener { startActivity(android.content.Intent(this@TrialExpiredActivity, ShopActivity::class.java)); finish() }
-        })
+        // ★ 可聚焦按钮 + 遥控器高亮（原来 Button 无人聚焦，遥控器按 OK 没反应）
+        fun focusableBtn(label: String, size: Float, onClick: () -> Unit) =
+            Button(this).apply {
+                text = label; textSize = size
+                isFocusable = true; isFocusableInTouchMode = true
+                setTextColor(0xFFFFFFFFu.toInt())
+                background = android.graphics.drawable.StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_focused),
+                        android.graphics.drawable.ColorDrawable(0xFF1B6EF3.toInt()))
+                    addState(intArrayOf(),
+                        android.graphics.drawable.ColorDrawable(0xFF2A2F3A.toInt()))
+                }
+                setPadding(48, 26, 48, 26)
+                setOnClickListener { onClick() }
+            }
+
+        val buyBtn = focusableBtn("购买套餐（OK 键）", 19f) {
+            try {
+                startActivity(android.content.Intent(this@TrialExpiredActivity, ShopActivity::class.java))
+            } catch (e: Exception) { }
+            finish()
+        }
+        root.addView(buyBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 20 })
+
+        // ★ 新增：明确的关闭入口（原来只能靠按 BACK，而 BACK 走的是系统默认）
+        val closeBtn = focusableBtn("关闭（返回键也可以）", 17f) { finish() }
+        root.addView(closeBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = 8 })
 
         root.addView(TextView(this).apply {
             text = "或直接访问：http://app.88531.cn:8881/#/shop"
             textSize = 13f; setTextColor(0xFF888888u.toInt())
-            gravity = android.view.Gravity.CENTER; setPadding(0, 32, 0, 0)
+            gravity = android.view.Gravity.CENTER; setPadding(0, 28, 0, 0)
         })
 
         root.addView(TextView(this).apply {
@@ -65,6 +89,15 @@ class TrialExpiredActivity : Activity() {
             textSize = 14f; setTextColor(0xFF7799AAu.toInt())
             gravity = android.view.Gravity.CENTER; setPadding(0, 24, 0, 0)
         })
+
+        // 默认聚焦「购买套餐」，遥控器 OK 直接可按；左右/上下在两个按钮间切换
+        buyBtn.post { buyBtn.requestFocus() }
+    }
+
+    /** ★ 返回键显式处理（原来没有，走系统默认，用户不知道能关） */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) { finish(); return true }
+        return super.onKeyDown(keyCode, event)
     }
 
     private fun openShop() {

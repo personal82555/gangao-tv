@@ -140,4 +140,9 @@ class LoginActivity : Activity() {
         startActivity(Intent(this, MainActivity::class.java))
         finish()
     }
+    /** ★ 返回键显式处理（原来缺失 → 走系统默认，用户按返回无提示） */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) { finish(); return true }
+        return super.onKeyDown(keyCode, event)
+    }
 }

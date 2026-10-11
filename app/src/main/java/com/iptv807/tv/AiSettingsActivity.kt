@@ -96,4 +96,8 @@ class AiSettingsActivity : Activity() {
             }.start()
         }
     }
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK) { finish(); return true }
+        return super.onKeyDown(keyCode, event)
+    }
 }
